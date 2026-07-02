@@ -28,7 +28,9 @@ var state = {
   importTab: 'pptx',           // 'pptx' | 'json'
   pptxPreview: null,           // array of parsed-but-unconfirmed slides
   emailAudience: '__all__',
-  emailBaseUrl: ''
+  emailBaseUrl: '',
+  execHtml: null,             // last generated executive email HTML (for preview/download/copy)
+  execCriticalCount: 5
 };
 
 /* ============================================================
@@ -966,6 +968,222 @@ async function exportAllRegionalDigests(){
 }
 
 
+/* ============================================================
+   ADMIN: EXECUTIVE EMAIL ("Generate Email")
+   ------------------------------------------------------------
+   A single, leadership-facing digest: reporting period, a short
+   auto-generated summary, per-platform counts, the 3-5 updates
+   flagged as most critical, and a CTA back into the full tool.
+
+   Note on "AI-generated": this runs entirely in the browser, so
+   the summary is produced by a rules/heuristic engine below, not
+   a live model call (a static page has nowhere safe to hold an
+   API key). If a backend/proxy endpoint is ever added, swap the
+   body of generateExecSummary() for that call.
+   ============================================================ */
+
+function reportingPeriodLabel(list){
+  var dates = list.map(function(s){ return s.date; }).filter(Boolean).sort();
+  if (dates.length){
+    var min = dates[0], max = dates[dates.length-1];
+    return min === max ? fmtDate(min) : (fmtDate(min) + ' – ' + fmtDate(max));
+  }
+  var dr = list.map(function(s){ return s.date_range; }).filter(Boolean)[0];
+  return dr || 'Current period';
+}
+
+// Heuristic 0+ score — higher means more likely to need seller/leadership attention.
+function scoreCriticality(s){
+  var score = 0;
+  var title = (s.title || '').toLowerCase();
+  var bodyText = s.body.map(function(b){ return b.text || ''; }).join(' ').toLowerCase();
+  var all = title + ' ' + bodyText;
+
+  if (/\[important/.test(title) || /important update/.test(title)) score += 4;
+  if (/effective|deadline|required|mandatory|must\b|penalty|violation|masked|restrict|prohibit|not allowed/.test(all)) score += 2;
+  if (/protection|privacy|compliance|policy|infringement/.test(all)) score += 2;
+  if (/claims?\b/.test(title)) score += 1;
+
+  if (s.date){
+    var diffDays = (new Date(s.date + 'T00:00:00') - new Date()) / 86400000;
+    if (diffDays >= 0 && diffDays <= 14) score += 1; // taking effect soon
+  }
+  return score;
+}
+
+function pickCriticalUpdates(list, n){
+  var scored = list.map(function(s){ return { s: s, score: scoreCriticality(s) }; });
+  scored.sort(function(a, b){
+    if (b.score !== a.score) return b.score - a.score;
+    return (b.s.date || '').localeCompare(a.s.date || ''); // ties: most recent first
+  });
+  return scored.slice(0, Math.min(n, scored.length)).map(function(x){ return x.s; });
+}
+
+var EXEC_THEMES = [
+  { label: 'compliance and content-policy changes', re: /polic|complian|claims?\b|protect|restrict|prohibit|masked|privacy|infringement|intellectual property|\bipr?\b/i },
+  { label: 'shipping and fulfilment updates', re: /deliver|shipping|fulfil|fulfill|logistics|warehouse/i },
+  { label: 'seller account and tooling changes', re: /account|organi[sz]ation|dashboard|centre|center|export|\btool/i }
+];
+
+function generateExecSummary(list, criticalList){
+  var platformCounts = {};
+  list.forEach(function(s){ platformCounts[s.platform] = (platformCounts[s.platform] || 0) + 1; });
+  var platformParts = ALLOWED_PLATFORMS.filter(function(p){ return platformCounts[p]; })
+    .map(function(p){ return platformCounts[p] + ' on ' + p; });
+
+  var themeHits = EXEC_THEMES.filter(function(t){
+    return list.some(function(s){ return t.re.test(s.title) || s.body.some(function(b){ return b.text && t.re.test(b.text); }); });
+  }).map(function(t){ return t.label; });
+
+  var s1 = list.length
+    ? 'This period brings ' + list.length + ' platform update' + (list.length === 1 ? '' : 's') + (platformParts.length ? ' (' + platformParts.join(', ') + ')' : '') + '.'
+    : 'No platform updates were recorded for this period.';
+
+  var s2 = themeHits.length
+    ? 'The main areas of focus are ' + themeHits.join(', ').replace(/, ([^,]*)$/, ' and $1') + '.'
+    : '';
+
+  var s3 = criticalList.length
+    ? criticalList.length + ' update' + (criticalList.length === 1 ? ' is' : 's are') + ' flagged below as needing closer attention from sellers.'
+    : '';
+
+  return [s1, s2, s3].filter(Boolean).join(' ');
+}
+
+function buildExecEmailHtml(list, criticalList, opts){
+  opts = opts || {};
+  var periodLabel = opts.periodLabel || 'Current period';
+  var baseUrl = (opts.baseUrl || '').trim();
+
+  var platformCounts = {};
+  list.forEach(function(s){ platformCounts[s.platform] = (platformCounts[s.platform] || 0) + 1; });
+  var countsHtml = ALLOWED_PLATFORMS.filter(function(p){ return platformCounts[p]; }).map(function(p){
+    return '<td style="padding:0 22px 0 0;">'
+      + '<div style="font-size:21px;font-weight:800;color:#1b2a4a;font-family:Arial,Helvetica,sans-serif;line-height:1;">' + platformCounts[p] + '</div>'
+      + '<div style="font-size:10.5px;color:#6b7684;text-transform:uppercase;letter-spacing:.06em;font-family:Arial,Helvetica,sans-serif;margin-top:3px;">' + esc(p) + '</div>'
+    + '</td>';
+  }).join('');
+
+  var summaryText = generateExecSummary(list, criticalList);
+
+  var criticalHtml = criticalList.map(function(s, i){
+    var linkEl = s.link ? '<a href="' + esc(s.link) + '" style="font-size:12px;color:#1f3a63;text-decoration:none;font-weight:700;">Source &#8594;</a>' : '';
+    return '<tr><td style="padding:16px 32px;border-bottom:1px solid #e3e7ec;font-family:Arial,Helvetica,sans-serif;">'
+      + '<table role="presentation" cellpadding="0" cellspacing="0"><tr>'
+        + '<td valign="top" style="width:28px;padding-right:10px;">'
+          + '<div style="width:22px;height:22px;border-radius:50%;background:#1b2a4a;color:#ffffff;font-size:11px;font-weight:700;text-align:center;line-height:22px;">' + (i + 1) + '</div>'
+        + '</td>'
+        + '<td valign="top">'
+          + '<div style="font-size:10.5px;color:#6b7684;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;">' + esc(s.platform) + ' &nbsp;&middot;&nbsp; ' + esc(s.region) + (s.date ? ' &nbsp;&middot;&nbsp; ' + esc(fmtDate(s.date)) : '') + '</div>'
+          + '<div style="font-size:14.5px;font-weight:700;color:#1b2a4a;margin-bottom:4px;line-height:1.35;">' + esc(s.title) + '</div>'
+          + '<div style="font-size:13px;color:#4a5568;line-height:1.55;margin-bottom:6px;">' + esc(shortExcerpt(s, 150)) + '</div>'
+          + linkEl
+        + '</td>'
+      + '</tr></table>'
+    + '</td></tr>';
+  }).join('');
+
+  var ctaHtml = baseUrl
+    ? '<tr><td align="center" style="padding:26px 32px 6px;">'
+        + '<a href="' + esc(baseUrl) + '" style="display:inline-block;background:#1b2a4a;color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:700;text-decoration:none;padding:14px 32px;border-radius:6px;">Open Interactive Newsletter &#8594;</a>'
+      + '</td></tr>'
+    : '';
+
+  var stamp = new Date().toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+  return '<!doctype html>'
+  + '<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">'
+  + '<title>Platform Updates — Executive Briefing</title></head>'
+  + '<body style="margin:0;padding:0;background:#eef1f4;">'
+  + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f4;"><tr><td align="center" style="padding:28px 12px;">'
+  + '<table role="presentation" width="640" cellpadding="0" cellspacing="0" style="background:#ffffff;max-width:640px;width:100%;border:1px solid #dfe3e8;">'
+
+    + '<tr><td style="background:#1b2a4a;padding:30px 32px;font-family:Arial,Helvetica,sans-serif;">'
+      + '<div style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#8fa3c7;">Executive Briefing</div>'
+      + '<div style="font-size:25px;font-weight:800;color:#ffffff;margin-top:6px;">Platform Updates</div>'
+      + '<div style="font-size:13px;color:#c3ceda;margin-top:6px;">Reporting period: ' + esc(periodLabel) + '</div>'
+    + '</td></tr>'
+
+    + (countsHtml ? '<tr><td style="padding:20px 32px 18px;border-bottom:1px solid #e3e7ec;">'
+        + '<table role="presentation" cellpadding="0" cellspacing="0"><tr>' + countsHtml + '</tr></table>'
+      + '</td></tr>' : '')
+
+    + '<tr><td style="padding:22px 32px;font-family:Arial,Helvetica,sans-serif;">'
+      + '<div style="font-size:11.5px;font-weight:700;color:#1b2a4a;text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;">Executive Summary</div>'
+      + '<div style="font-size:13.5px;color:#3d4552;line-height:1.65;background:#f4f6f8;border-left:3px solid #1b2a4a;padding:14px 16px;">' + esc(summaryText) + '</div>'
+    + '</td></tr>'
+
+    + (criticalHtml ? '<tr><td style="padding:6px 32px 2px;font-family:Arial,Helvetica,sans-serif;">'
+        + '<div style="font-size:11.5px;font-weight:700;color:#1b2a4a;text-transform:uppercase;letter-spacing:.07em;">Top Updates Requiring Attention</div>'
+      + '</td></tr>' + criticalHtml : '')
+
+    + ctaHtml
+
+    + '<tr><td style="padding:22px 32px 28px;border-top:1px solid #e3e7ec;font-family:Arial,Helvetica,sans-serif;">'
+      + '<div style="font-size:11.5px;color:#6b7684;">' + list.length + ' total update' + (list.length === 1 ? '' : 's') + ' this period &nbsp;&middot;&nbsp; Generated ' + esc(stamp) + '</div>'
+      + '<div style="font-size:10.5px;color:#9aa4b1;margin-top:4px;">Automatically generated. Flag issues to the PIC.</div>'
+    + '</td></tr>'
+
+  + '</table>'
+  + '</td></tr></table>'
+  + '</body></html>';
+}
+
+function currentExecScope(){
+  var el = document.querySelector('input[name="execScope"]:checked');
+  return el ? el.value : 'filtered';
+}
+
+function renderExecPreview(){
+  var wrap = document.getElementById('execPreviewWrap');
+  if (!wrap) return;
+  if (!state.execHtml){ wrap.innerHTML = ''; return; }
+
+  wrap.innerHTML =
+    '<div class="execpreview"><iframe id="execPreviewFrame" title="Executive email preview"></iframe></div>'
+    + '<div class="adminpanel__row" style="margin-top:10px;">'
+      + '<button type="button" class="btn" id="execDownloadBtn">Download email HTML</button>'
+      + '<button type="button" class="btn btn--ghost" id="execCopyBtn">Copy HTML to clipboard</button>'
+    + '</div>';
+
+  document.getElementById('execPreviewFrame').srcdoc = state.execHtml;
+
+  document.getElementById('execDownloadBtn').addEventListener('click', function(){
+    var stamp = new Date().toISOString().slice(0,10);
+    download('executive-email-' + stamp + '.html', state.execHtml, 'text/html');
+    setStatus('Downloaded the executive email HTML. Open the file and copy its contents into your email client, or forward it as an HTML attachment.', true);
+  });
+  document.getElementById('execCopyBtn').addEventListener('click', function(){
+    navigator.clipboard.writeText(state.execHtml).then(function(){
+      setStatus('Copied the executive email HTML to your clipboard.', true);
+    }).catch(function(){
+      setStatus('Could not copy automatically — use the Download button instead.', false);
+    });
+  });
+}
+
+function generateExecEmail(){
+  var scope = currentExecScope();
+  var list = scope === 'all' ? slides : filteredSlides();
+  if (!list.length){
+    setStatus('Nothing to include — no slides in the selected scope.', false);
+    return;
+  }
+
+  var n = parseInt(document.getElementById('execCriticalCount').value, 10) || 5;
+  state.execCriticalCount = n;
+  var criticalList = pickCriticalUpdates(list, n);
+
+  var baseUrlEl = document.getElementById('emailBaseUrl');
+  var baseUrl = baseUrlEl ? baseUrlEl.value.trim() : '';
+  var periodLabel = reportingPeriodLabel(list);
+
+  state.execHtml = buildExecEmailHtml(list, criticalList, { periodLabel: periodLabel, baseUrl: baseUrl });
+  renderExecPreview();
+  setStatus('Generated the executive email — ' + list.length + ' update' + (list.length === 1 ? '' : 's') + ', ' + criticalList.length + ' flagged as critical.', true);
+}
+
 function renderAdminPanel(){
   var panel = document.getElementById('adminPanel');
   panel.className = 'adminpanel' + (state.adminOpen ? ' is-open' : '');
@@ -1037,6 +1255,24 @@ function renderAdminPanel(){
         + '<button type="button" class="btn btn--ghost" id="exportEmailAllBtn">Download all regional digests (.zip)</button>'
       + '</div>'
     + '</div>'
+
+    + '<div class="adminpanel__section" style="flex-basis:100%;border-top:1px solid var(--line);padding-top:16px;">'
+      + '<h3>Generate Email</h3>'
+      + '<p class="adminpanel__hint">Produces a short, leadership-facing briefing — reporting period, an auto-generated executive summary, per-platform counts, the top critical updates, and a button back into this tool. (The summary is written by a heuristic scoring engine that runs locally, not a live model call — see the comment above <code>generateExecSummary()</code> in script.js if you want to wire in a real API.) Reuses the Digest base URL field above for the "Open Interactive Newsletter" button.</p>'
+      + '<div class="adminpanel__row" style="margin-bottom:10px;">'
+        + '<label style="font-size:12.5px;display:flex;align-items:center;gap:5px;"><input type="radio" name="execScope" value="filtered" checked> Current filtered view ('+filteredSlides().length+')</label>'
+        + '<label style="font-size:12.5px;display:flex;align-items:center;gap:5px;"><input type="radio" name="execScope" value="all"> All slides ('+slides.length+')</label>'
+      + '</div>'
+      + '<div class="fieldrow">'
+        + '<label>Top critical updates<select id="execCriticalCount">'
+          + [3,4,5].map(function(v){ return '<option value="'+v+'"'+(state.execCriticalCount===v?' selected':'')+'>'+v+'</option>'; }).join('')
+        + '</select></label>'
+      + '</div>'
+      + '<div class="adminpanel__row">'
+        + '<button type="button" class="btn" id="execGenerateBtn">Generate Email</button>'
+      + '</div>'
+      + '<div id="execPreviewWrap"></div>'
+    + '</div>'
     + '<div class="adminpanel__status" id="adminStatus"></div>';
 
   // tabs
@@ -1086,6 +1322,10 @@ function renderAdminPanel(){
   document.getElementById('emailBaseUrl').addEventListener('input', function(e){ state.emailBaseUrl = e.target.value; });
   document.getElementById('exportEmailBtn').addEventListener('click', exportEmailDigest);
   document.getElementById('exportEmailAllBtn').addEventListener('click', exportAllRegionalDigests);
+
+  // executive email
+  document.getElementById('execGenerateBtn').addEventListener('click', generateExecEmail);
+  if (state.execHtml) renderExecPreview();
 
   if (state.pptxPreview) renderPptxPreview();
 }

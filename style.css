@@ -549,6 +549,21 @@ input[type="file"]{display:none;}
 .pptxrow__imgcount{font-family:var(--mono);font-size:10.5px;color:var(--muted);}
 .pptxrow__include{flex:none;margin-top:4px;}
 
+/* ---------- Generate Email (executive digest) preview ---------- */
+.execpreview{
+  border:1px solid var(--line);
+  border-radius:var(--radius-sm);
+  overflow:hidden;
+  background:#eef1f4;
+  margin-top:6px;
+}
+.execpreview iframe{
+  width:100%;
+  height:560px;
+  border:0;
+  display:block;
+}
+
 /* ---------- Print / PDF export ---------- */
 #printArea{display:none;}
 .pdf-doc{padding:0;}
