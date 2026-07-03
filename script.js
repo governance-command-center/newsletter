@@ -1051,10 +1051,50 @@ function generateExecSummary(list, criticalList){
   return [s1, s2, s3].filter(Boolean).join(' ');
 }
 
+// Same brand-accent colors used by the on-screen card badges (see .card__badge in
+// style.css) — reused here so a slide with no picture still gets a recognisable,
+// on-brand placeholder instead of a blank box or a scraped/trademarked logo.
+var PLATFORM_BADGE_COLOR = {
+  Lazada: '#0f146d',
+  Shopee: '#ee4d2d',
+  Tiktok: '#111111',
+  Zalora: '#111111',
+  Others: '#6b6b6b'
+};
+
+function firstSlideImage(s){
+  return s.body.find(function(b){ return b.type === 'image' && b.dataUrl; }) || null;
+}
+
+// Shrinks a slide's embedded image down to a small JPEG data URL entirely in the
+// browser (canvas), so the email stays a reasonable size even with several
+// pictures — full-resolution base64 images are what makes emails get clipped by
+// Gmail or bloated in Outlook. Resolves null if the image can't be decoded.
+function makeThumbnailDataUrl(dataUrl, maxSize){
+  return new Promise(function(resolve){
+    var img = new Image();
+    img.onload = function(){
+      var scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+      var w = Math.max(1, Math.round(img.width * scale));
+      var h = Math.max(1, Math.round(img.height * scale));
+      var canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      var ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      try { resolve(canvas.toDataURL('image/jpeg', 0.62)); }
+      catch (e) { resolve(null); }
+    };
+    img.onerror = function(){ resolve(null); };
+    img.src = dataUrl;
+  });
+}
+
 function buildExecEmailHtml(list, criticalList, opts){
+
   opts = opts || {};
   var periodLabel = opts.periodLabel || 'Current period';
   var baseUrl = (opts.baseUrl || '').trim();
+  var thumbs = opts.thumbs || {}; // slide.id -> shrunk data URL, built by generateExecEmail()
 
   var platformCounts = {};
   list.forEach(function(s){ platformCounts[s.platform] = (platformCounts[s.platform] || 0) + 1; });
@@ -1069,11 +1109,33 @@ function buildExecEmailHtml(list, criticalList, opts){
 
   var criticalHtml = criticalList.map(function(s, i){
     var linkEl = s.link ? '<a href="' + esc(s.link) + '" style="font-size:12px;color:#1f3a63;text-decoration:none;font-weight:700;">Source &#8594;</a>' : '';
+
+    // Image cell: a real picture (shrunk thumbnail) if the slide has one, else a
+    // colored initial-letter placeholder in the platform's brand accent. The
+    // thumbnail links back into the interactive tool, deep-linked to this exact
+    // update, where the full-resolution picture renders — that's the "zoom": a
+    // normal link rather than a JS lightbox, since email clients strip <script>.
+    var thumb = thumbs[s.id];
+    var tLink = toolLink(baseUrl, s);
+    var imgCell;
+    if (thumb) {
+      var imgTag = '<img src="' + thumb + '" width="56" height="56" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid #dfe3e8;display:block;" alt="' + esc(s.title) + '">';
+      imgCell = tLink
+        ? '<a href="' + esc(tLink) + '" style="text-decoration:none;">' + imgTag + '</a>'
+          + '<div style="text-align:center;font-size:9px;color:#6b7684;margin-top:3px;font-family:Arial,Helvetica,sans-serif;">&#128269; Zoom</div>'
+        : imgTag;
+    } else {
+      var initial = (s.platform || '?').charAt(0);
+      var bg = PLATFORM_BADGE_COLOR[s.platform] || '#1b2a4a';
+      imgCell = '<div style="width:56px;height:56px;border-radius:6px;background:' + bg + ';color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:20px;font-weight:800;text-align:center;line-height:56px;">' + esc(initial) + '</div>';
+    }
+
     return '<tr><td style="padding:16px 32px;border-bottom:1px solid #e3e7ec;font-family:Arial,Helvetica,sans-serif;">'
       + '<table role="presentation" cellpadding="0" cellspacing="0"><tr>'
         + '<td valign="top" style="width:28px;padding-right:10px;">'
           + '<div style="width:22px;height:22px;border-radius:50%;background:#1b2a4a;color:#ffffff;font-size:11px;font-weight:700;text-align:center;line-height:22px;">' + (i + 1) + '</div>'
         + '</td>'
+        + '<td valign="top" style="width:66px;padding-right:12px;">' + imgCell + '</td>'
         + '<td valign="top">'
           + '<div style="font-size:10.5px;color:#6b7684;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;">' + esc(s.platform) + ' &nbsp;&middot;&nbsp; ' + esc(s.region) + (s.date ? ' &nbsp;&middot;&nbsp; ' + esc(fmtDate(s.date)) : '') + '</div>'
           + '<div style="font-size:14.5px;font-weight:700;color:#1b2a4a;margin-bottom:4px;line-height:1.35;">' + esc(s.title) + '</div>'
@@ -1163,7 +1225,7 @@ function renderExecPreview(){
   });
 }
 
-function generateExecEmail(){
+async function generateExecEmail(){
   var scope = currentExecScope();
   var list = scope === 'all' ? slides : filteredSlides();
   if (!list.length){
@@ -1179,9 +1241,22 @@ function generateExecEmail(){
   var baseUrl = baseUrlEl ? baseUrlEl.value.trim() : '';
   var periodLabel = reportingPeriodLabel(list);
 
-  state.execHtml = buildExecEmailHtml(list, criticalList, { periodLabel: periodLabel, baseUrl: baseUrl });
+  var withImages = criticalList.filter(firstSlideImage);
+  var thumbs = {};
+  if (withImages.length){
+    setStatus('Shrinking ' + withImages.length + ' image' + (withImages.length === 1 ? '' : 's') + ' for the email…', true);
+    for (var i = 0; i < withImages.length; i++){
+      var s = withImages[i];
+      var img = firstSlideImage(s);
+      var thumbUrl = await makeThumbnailDataUrl(img.dataUrl, 130);
+      if (thumbUrl) thumbs[s.id] = thumbUrl;
+    }
+  }
+
+  state.execHtml = buildExecEmailHtml(list, criticalList, { periodLabel: periodLabel, baseUrl: baseUrl, thumbs: thumbs });
   renderExecPreview();
-  setStatus('Generated the executive email — ' + list.length + ' update' + (list.length === 1 ? '' : 's') + ', ' + criticalList.length + ' flagged as critical.', true);
+  var withImageCount = Object.keys(thumbs).length;
+  setStatus('Generated the executive email — ' + list.length + ' update' + (list.length === 1 ? '' : 's') + ', ' + criticalList.length + ' flagged as critical' + (withImageCount ? ' (' + withImageCount + ' with a thumbnail, the rest with a platform badge)' : '') + '.', true);
 }
 
 function renderAdminPanel(){
@@ -1258,7 +1333,7 @@ function renderAdminPanel(){
 
     + '<div class="adminpanel__section" style="flex-basis:100%;border-top:1px solid var(--line);padding-top:16px;">'
       + '<h3>Generate Email</h3>'
-      + '<p class="adminpanel__hint">Produces a short, leadership-facing briefing — reporting period, an auto-generated executive summary, per-platform counts, the top critical updates, and a button back into this tool. (The summary is written by a heuristic scoring engine that runs locally, not a live model call — see the comment above <code>generateExecSummary()</code> in script.js if you want to wire in a real API.) Reuses the Digest base URL field above for the "Open Interactive Newsletter" button.</p>'
+      + '<p class="adminpanel__hint">Produces a short, leadership-facing briefing — reporting period, an auto-generated executive summary, per-platform counts, and the top critical updates, each with a small thumbnail (shrunk in-browser so the email stays light) or a platform-colored badge if the slide has no picture. Clicking a thumbnail opens that update in the interactive tool for the full-size image — email clients strip JavaScript, so this is a real link rather than a pop-up zoom. Clicking the title/source still goes straight to the platform page. (The summary itself is written by a heuristic scoring engine that runs locally, not a live model call — see the comment above <code>generateExecSummary()</code> in script.js if you want to wire in a real API.) Reuses the Digest base URL field above for zoom links and the "Open Interactive Newsletter" button — without it, thumbnails still show but aren\'t clickable.</p>'
       + '<div class="adminpanel__row" style="margin-bottom:10px;">'
         + '<label style="font-size:12.5px;display:flex;align-items:center;gap:5px;"><input type="radio" name="execScope" value="filtered" checked> Current filtered view ('+filteredSlides().length+')</label>'
         + '<label style="font-size:12.5px;display:flex;align-items:center;gap:5px;"><input type="radio" name="execScope" value="all"> All slides ('+slides.length+')</label>'
