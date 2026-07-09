@@ -17,20 +17,37 @@ var slides = SEED.slides.slice();
    STATE
    ============================================================ */
 var state = {
-  view: 'platform',            // 'platform' | 'region'
+  // nav: which left-sidebar item is active.
+  //   browse views: 'platform' | 'region'
+  //   admin panes:  'import' | 'export' | 'digest' | 'email'
+  nav: 'platform',
+  view: 'platform',            // mirrors nav for the two browse views (kept for grouping logic)
   search: '',
   platforms: new Set(),        // empty set = "all"
   regions: new Set(),          // empty set = "all"
   dateFrom: '',
   dateTo: '',
   openCards: new Set(),
-  adminOpen: false,
+  sidebarOpen: false,          // mobile drawer
   importTab: 'pptx',           // 'pptx' | 'json'
   pptxPreview: null,           // array of parsed-but-unconfirmed slides
   emailAudience: '__all__',
   emailBaseUrl: '',
   execHtml: null,             // last generated executive email HTML (for preview/download/copy)
+  digestHtml: null,           // last generated regional digest HTML
   execCriticalCount: 5
+};
+
+var BROWSE_VIEWS = { platform: true, region: true };
+function isBrowseNav(nav){ return !!BROWSE_VIEWS[nav]; }
+
+var NAV_META = {
+  platform: { title: 'By Platform', sub: 'Every update, grouped by marketplace.' },
+  region:   { title: 'By Region',   sub: 'Every update, grouped by market — the same grouping used in the email view.' },
+  import:   { title: 'Import slides', sub: 'Bring in a PowerPoint deck or a JSON backup.' },
+  export:   { title: 'Export slides', sub: 'Download the current view as PDF or JSON.' },
+  digest:   { title: 'Regional digests', sub: 'Inline-styled HTML emails, one per region.' },
+  email:    { title: 'Generate email', sub: 'A leadership briefing you can preview and paste straight into your inbox.' }
 };
 
 /* ============================================================
@@ -1197,32 +1214,149 @@ function currentExecScope(){
   return el ? el.value : 'filtered';
 }
 
+// Pull the inner <body> markup out of a full HTML document. When we put the
+// email on the clipboard as text/html, email clients paste the fragment inside
+// their own <body>, so handing them a whole document (with <html>/<head>) can
+// get stripped or double-wrapped. The fragment keeps every inline style, link
+// and inline base64 image intact — which is what makes the paste look identical.
+function emailBodyFragment(fullHtml){
+  var m = /<body[^>]*>([\s\S]*?)<\/body>/i.exec(fullHtml);
+  return m ? m[1] : fullHtml;
+}
+
+// Writes the styled email to the clipboard as BOTH rich HTML and plain text.
+// Pasting into Gmail / Outlook / Apple Mail then keeps the formatting, working
+// hyperlinks and inline images exactly as previewed. Falls back to a hidden
+// contentEditable + execCommand('copy') for browsers without ClipboardItem.
+function copyRichEmail(fullHtml, onOk, onFail){
+  var fragment = emailBodyFragment(fullHtml);
+  var plain = fragment.replace(/<style[\s\S]*?<\/style>/gi,'')
+                      .replace(/<[^>]+>/g,' ')
+                      .replace(/&nbsp;/g,' ')
+                      .replace(/\s+/g,' ').trim();
+
+  function legacyCopy(){
+    var holder = document.createElement('div');
+    holder.setAttribute('contenteditable','true');
+    holder.style.cssText = 'position:fixed;left:-9999px;top:0;white-space:normal;';
+    holder.innerHTML = fragment;
+    document.body.appendChild(holder);
+    var range = document.createRange();
+    range.selectNodeContents(holder);
+    var sel = window.getSelection();
+    sel.removeAllRanges(); sel.addRange(range);
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    sel.removeAllRanges();
+    document.body.removeChild(holder);
+    if (ok) onOk(); else onFail();
+  }
+
+  if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write){
+    try {
+      var item = new ClipboardItem({
+        'text/html': new Blob([fragment], { type:'text/html' }),
+        'text/plain': new Blob([plain], { type:'text/plain' })
+      });
+      navigator.clipboard.write([item]).then(onOk).catch(legacyCopy);
+    } catch (e) {
+      legacyCopy();
+    }
+  } else {
+    legacyCopy();
+  }
+}
+
+function flashToast(btn){
+  var toast = btn.querySelector('.copybtn__toast');
+  if (!toast) return;
+  toast.classList.add('is-show');
+  setTimeout(function(){ toast.classList.remove('is-show'); }, 1600);
+}
+
 function renderExecPreview(){
   var wrap = document.getElementById('execPreviewWrap');
   if (!wrap) return;
   if (!state.execHtml){ wrap.innerHTML = ''; return; }
 
   wrap.innerHTML =
-    '<div class="execpreview"><iframe id="execPreviewFrame" title="Executive email preview"></iframe></div>'
-    + '<div class="adminpanel__row" style="margin-top:10px;">'
-      + '<button type="button" class="btn" id="execDownloadBtn">Download email HTML</button>'
-      + '<button type="button" class="btn btn--ghost" id="execCopyBtn">Copy HTML to clipboard</button>'
+    '<div class="emailpreview">'
+      + '<div class="emailpreview__bar">'
+        + '<span class="emailpreview__label">Email preview</span>'
+        + '<button type="button" class="btn copybtn" id="execCopyBtn"><span class="copybtn__toast">Copied — paste into your email</span>Copy for email</button>'
+        + '<button type="button" class="btn btn--ghost" id="execCopyHtmlBtn">Copy HTML source</button>'
+        + '<button type="button" class="btn btn--ghost" id="execDownloadBtn">Download .html</button>'
+      + '</div>'
+      + '<iframe id="execPreviewFrame" title="Executive email preview"></iframe>'
     + '</div>';
 
   document.getElementById('execPreviewFrame').srcdoc = state.execHtml;
 
+  document.getElementById('execCopyBtn').addEventListener('click', function(){
+    var btn = this;
+    copyRichEmail(state.execHtml, function(){
+      flashToast(btn);
+      setStatus('Copied. Paste (Ctrl/Cmd+V) into a new Gmail, Outlook or Apple Mail message — the layout, links and images come across exactly as shown.', true);
+    }, function(){
+      setStatus('Couldn\'t copy the styled version automatically. Use "Download .html", open the file, then select-all and copy into your email.', false);
+    });
+  });
+  document.getElementById('execCopyHtmlBtn').addEventListener('click', function(){
+    navigator.clipboard.writeText(state.execHtml).then(function(){
+      setStatus('Copied the raw HTML source — useful for pasting into an email template or a CMS "source" view.', true);
+    }).catch(function(){
+      setStatus('Could not copy the source automatically — use the Download button instead.', false);
+    });
+  });
   document.getElementById('execDownloadBtn').addEventListener('click', function(){
     var stamp = new Date().toISOString().slice(0,10);
     download('executive-email-' + stamp + '.html', state.execHtml, 'text/html');
-    setStatus('Downloaded the executive email HTML. Open the file and copy its contents into your email client, or forward it as an HTML attachment.', true);
+    setStatus('Downloaded the email as HTML. Open it and copy its contents into your email client, or forward it as an HTML attachment.', true);
   });
-  document.getElementById('execCopyBtn').addEventListener('click', function(){
-    navigator.clipboard.writeText(state.execHtml).then(function(){
-      setStatus('Copied the executive email HTML to your clipboard.', true);
-    }).catch(function(){
-      setStatus('Could not copy automatically — use the Download button instead.', false);
+}
+
+/* ============================================================
+   REGIONAL DIGEST — inline preview (mirrors the exec preview)
+   ============================================================ */
+function previewRegionalDigest(){
+  var audience = state.emailAudience;
+  var region = audience === '__all__' ? null : audience;
+  var list = slidesForAudience(region);
+  var wrap = document.getElementById('digestPreviewWrap');
+  if (!list.length){
+    if (wrap) wrap.innerHTML = '';
+    setStatus('Nothing to preview — no slides match the current filters'+(region ? ' for '+region : '')+'.', false);
+    return;
+  }
+  var html = buildEmailHtml(list, {
+    audienceLabel: region || 'All regions',
+    groupByRegion: !region,
+    baseUrl: state.emailBaseUrl.trim()
+  });
+  state.digestHtml = html;
+
+  wrap.innerHTML =
+    '<div class="emailpreview">'
+      + '<div class="emailpreview__bar">'
+        + '<span class="emailpreview__label">Digest preview — '+esc(region || 'All regions')+'</span>'
+        + '<button type="button" class="btn copybtn" id="digestCopyBtn"><span class="copybtn__toast">Copied — paste into your email</span>Copy for email</button>'
+        + '<button type="button" class="btn btn--ghost" id="digestDownloadBtn">Download .html</button>'
+      + '</div>'
+      + '<iframe id="digestPreviewFrame" title="Regional digest preview"></iframe>'
+    + '</div>';
+  document.getElementById('digestPreviewFrame').srcdoc = html;
+
+  document.getElementById('digestCopyBtn').addEventListener('click', function(){
+    var btn = this;
+    copyRichEmail(html, function(){
+      flashToast(btn);
+      setStatus('Copied. Paste into a new email — layout and links come across as previewed.', true);
+    }, function(){
+      setStatus('Couldn\'t copy automatically. Use "Download .html", open the file, then select-all and copy.', false);
     });
   });
+  document.getElementById('digestDownloadBtn').addEventListener('click', exportEmailDigest);
+  setStatus('Preview ready for '+(region || 'all regions')+' ('+list.length+' update'+(list.length===1?'':'s')+'). Copy it for email, or download the HTML.', true);
 }
 
 async function generateExecEmail(){
@@ -1259,27 +1393,35 @@ async function generateExecEmail(){
   setStatus('Generated the executive email — ' + list.length + ' update' + (list.length === 1 ? '' : 's') + ', ' + criticalList.length + ' flagged as critical' + (withImageCount ? ' (' + withImageCount + ' with a thumbnail, the rest with a platform badge)' : '') + '.', true);
 }
 
-function renderAdminPanel(){
-  var panel = document.getElementById('adminPanel');
-  panel.className = 'adminpanel' + (state.adminOpen ? ' is-open' : '');
-  if (!state.adminOpen) return;
+/* ============================================================
+   ADMIN PANES (rendered into #workspaceBody, one per nav item)
+   ============================================================ */
+function renderWorkspace(){
+  var wrap = document.getElementById('workspaceBody');
+  if (!wrap) return;
+  if (state.nav === 'import')      renderImportPane(wrap);
+  else if (state.nav === 'export') renderExportPane(wrap);
+  else if (state.nav === 'digest') renderDigestPane(wrap);
+  else if (state.nav === 'email')  renderEmailPane(wrap);
+}
 
-  panel.innerHTML =
-    '<div class="adminpanel__section" style="flex-basis:100%;">'
-      + '<h3>Import slides</h3>'
+function renderImportPane(wrap){
+  wrap.innerHTML =
+    '<div class="panel">'
+      + '<div class="panel__head"><h2 class="panel__title">Import slides</h2></div>'
       + '<div class="importtabs">'
         + '<button type="button" class="importtabs__btn'+(state.importTab==='pptx'?' is-active':'')+'" data-tab="pptx">From PowerPoint (.pptx)</button>'
         + '<button type="button" class="importtabs__btn'+(state.importTab==='json'?' is-active':'')+'" data-tab="json">From JSON (re-import / backup)</button>'
       + '</div>'
 
       + '<div class="importpane'+(state.importTab==='pptx'?' is-active':'')+'" id="paneImportPptx">'
-        + '<p class="adminpanel__hint">Upload a .pptx deck — the tool reads Platform, Region and Date straight from the file, no defaults to set:</p>'
-        + '<ul style="font-size:12px;color:var(--muted);margin:0 0 12px;padding-left:18px;line-height:1.6;">'
-          + '<li><strong>Region</strong> — use PowerPoint\'s <em>Sections</em> feature and name each section after a region ('+ALLOWED_REGIONS.join(', ')+'). Every slide in that section imports as that region.</li>'
-          + '<li><strong>Platform</strong> — add a small text box on the slide containing just the platform name ('+ALLOWED_PLATFORMS.join(', ')+'). Falls back to "Others" if none is found.</li>'
-          + '<li><strong>Date</strong> — add a small text box with a date (e.g. <code>2026-07-06</code> or <code>Jul 6</code>), or include it in the section name, e.g. <code>Singapore (Jun 29 – Jul 3)</code>.</li>'
-        + '</ul>'
-        + '<p class="adminpanel__hint">Slide text becomes the update: the first line is the title, the rest is the body, and any pictures on the slide are embedded automatically. Review the results below — anything not detected is flagged for you to fix before importing.</p>'
+        + '<p class="panel__hint">Upload a .pptx deck — the tool reads Platform, Region and Date straight from the file, no defaults to set:'
+          + '<ul>'
+            + '<li><strong>Region</strong> — use PowerPoint\'s <em>Sections</em> feature and name each section after a region ('+ALLOWED_REGIONS.join(', ')+'). Every slide in that section imports as that region.</li>'
+            + '<li><strong>Platform</strong> — add a small text box on the slide containing just the platform name ('+ALLOWED_PLATFORMS.join(', ')+'). Falls back to "Others" if none is found.</li>'
+            + '<li><strong>Date</strong> — add a small text box with a date (e.g. <code>2026-07-06</code> or <code>Jul 6</code>), or include it in the section name, e.g. <code>Singapore (Jun 29 – Jul 3)</code>.</li>'
+          + '</ul></p>'
+        + '<p class="panel__hint">Slide text becomes the update: the first line is the title, the rest is the body, and any pictures on the slide are embedded automatically. Review the results below — anything not detected is flagged for you to fix before importing.</p>'
         + '<div class="adminpanel__row">'
           + '<label class="btn btn--ghost" for="importPptxFile">Choose .pptx file</label>'
           + '<input type="file" id="importPptxFile" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation">'
@@ -1289,76 +1431,26 @@ function renderAdminPanel(){
       + '</div>'
 
       + '<div class="importpane'+(state.importTab==='json'?' is-active':'')+'" id="paneImportJson">'
-        + '<p class="adminpanel__hint">Paste or upload a JSON export from this tool (array of slides, or <code>{"slides":[...]}</code>). Used for re-importing backups.</p>'
+        + '<p class="panel__hint">Paste or upload a JSON export from this tool (array of slides, or <code>{"slides":[...]}</code>). Used for re-importing backups.</p>'
         + '<div class="adminpanel__row">'
           + '<label class="btn btn--ghost" for="importFile">Choose JSON file</label>'
           + '<input type="file" id="importFile" accept="application/json,.json">'
           + '<span id="importFileName" style="font-size:12px;color:var(--muted);"></span>'
         + '</div>'
         + '<textarea id="importText" placeholder=\'[{"platform":"Shopee","region":"Indonesia","date":"2026-07-06","title":"...","link":"...","body":[{"type":"para","text":"..."}]}]\'></textarea>'
-        + '<div class="adminpanel__row" style="margin-top:8px;">'
+        + '<div class="adminpanel__row">'
           + '<button type="button" class="btn" id="importTextBtn">Import pasted JSON</button>'
         + '</div>'
       + '</div>'
-    + '</div>'
+    + '</div>';
 
-    + '<div class="adminpanel__section" style="flex-basis:100%;border-top:1px solid var(--line);padding-top:16px;">'
-      + '<h3>Export slides</h3>'
-      + '<p class="adminpanel__hint">Exports respect the filters currently applied above (Platform, Region, Date, Search).</p>'
-      + '<div class="adminpanel__row" style="margin-bottom:10px;">'
-        + '<label style="font-size:12.5px;display:flex;align-items:center;gap:5px;"><input type="radio" name="exportScope" value="filtered" checked> Current filtered view ('+filteredSlides().length+')</label>'
-        + '<label style="font-size:12.5px;display:flex;align-items:center;gap:5px;"><input type="radio" name="exportScope" value="all"> All slides ('+slides.length+')</label>'
-      + '</div>'
-      + '<div class="adminpanel__row">'
-        + '<button type="button" class="btn" id="exportPdfBtn">Export as PDF</button>'
-        + '<button type="button" class="btn btn--ghost" id="exportJsonBtn">Export as JSON (for re-import)</button>'
-      + '</div>'
-    + '</div>'
-
-    + '<div class="adminpanel__section" style="flex-basis:100%;border-top:1px solid var(--line);padding-top:16px;">'
-      + '<h3>Email digest</h3>'
-      + '<p class="adminpanel__hint">Generates an inline-styled HTML email (works in Outlook/Gmail — no filtering or JS needed on the reader\'s end) with a "this issue at a glance" summary. Uses the Platform / Date / Search filters above; Region is set per-audience below instead of the Region chips. Pictures aren\'t embedded in emails (most inboxes block inline images) — each update links out to its source and, optionally, back to this tool.</p>'
-      + '<div class="fieldrow">'
-        + '<label>Audience<select id="emailAudience">'
-          + '<option value="__all__"'+(state.emailAudience==='__all__'?' selected':'')+'>All regions (grouped by region)</option>'
-          + ALLOWED_REGIONS.map(function(r){ return '<option value="'+esc(r)+'"'+(state.emailAudience===r?' selected':'')+'>'+esc(r)+' only</option>'; }).join('')
-        + '</select></label>'
-        + '<label style="flex:1;min-width:220px;">Digest base URL (optional — for "View full update" links)<input type="text" id="emailBaseUrl" placeholder="https://yourteam.github.io/platform-updates/" value="'+esc(state.emailBaseUrl)+'"></label>'
-      + '</div>'
-      + '<div class="adminpanel__row">'
-        + '<button type="button" class="btn" id="exportEmailBtn">Download email HTML</button>'
-        + '<button type="button" class="btn btn--ghost" id="exportEmailAllBtn">Download all regional digests (.zip)</button>'
-      + '</div>'
-    + '</div>'
-
-    + '<div class="adminpanel__section" style="flex-basis:100%;border-top:1px solid var(--line);padding-top:16px;">'
-      + '<h3>Generate Email</h3>'
-      + '<p class="adminpanel__hint">Produces a short, leadership-facing briefing — reporting period, an auto-generated executive summary, per-platform counts, and the top critical updates, each with a small thumbnail (shrunk in-browser so the email stays light) or a platform-colored badge if the slide has no picture. Clicking a thumbnail opens that update in the interactive tool for the full-size image — email clients strip JavaScript, so this is a real link rather than a pop-up zoom. Clicking the title/source still goes straight to the platform page. (The summary itself is written by a heuristic scoring engine that runs locally, not a live model call — see the comment above <code>generateExecSummary()</code> in script.js if you want to wire in a real API.) Reuses the Digest base URL field above for zoom links and the "Open Interactive Newsletter" button — without it, thumbnails still show but aren\'t clickable.</p>'
-      + '<div class="adminpanel__row" style="margin-bottom:10px;">'
-        + '<label style="font-size:12.5px;display:flex;align-items:center;gap:5px;"><input type="radio" name="execScope" value="filtered" checked> Current filtered view ('+filteredSlides().length+')</label>'
-        + '<label style="font-size:12.5px;display:flex;align-items:center;gap:5px;"><input type="radio" name="execScope" value="all"> All slides ('+slides.length+')</label>'
-      + '</div>'
-      + '<div class="fieldrow">'
-        + '<label>Top critical updates<select id="execCriticalCount">'
-          + [3,4,5].map(function(v){ return '<option value="'+v+'"'+(state.execCriticalCount===v?' selected':'')+'>'+v+'</option>'; }).join('')
-        + '</select></label>'
-      + '</div>'
-      + '<div class="adminpanel__row">'
-        + '<button type="button" class="btn" id="execGenerateBtn">Generate Email</button>'
-      + '</div>'
-      + '<div id="execPreviewWrap"></div>'
-    + '</div>'
-    + '<div class="adminpanel__status" id="adminStatus"></div>';
-
-  // tabs
-  panel.querySelectorAll('.importtabs__btn').forEach(function(btn){
+  wrap.querySelectorAll('.importtabs__btn').forEach(function(btn){
     btn.addEventListener('click', function(){
       state.importTab = btn.getAttribute('data-tab');
-      renderAdminPanel();
+      renderImportPane(wrap);
     });
   });
 
-  // pptx import
   document.getElementById('importPptxFile').addEventListener('change', function(e){
     var file = e.target.files[0];
     if (!file) return;
@@ -1373,7 +1465,6 @@ function renderAdminPanel(){
     });
   });
 
-  // json import
   document.getElementById('importFile').addEventListener('change', function(e){
     var file = e.target.files[0];
     if (!file) return;
@@ -1388,21 +1479,79 @@ function renderAdminPanel(){
     importSlides(txt, 'pasted JSON');
   });
 
-  // export
+  if (state.pptxPreview) renderPptxPreview();
+}
+
+function renderExportPane(wrap){
+  wrap.innerHTML =
+    '<div class="panel">'
+      + '<div class="panel__head"><h2 class="panel__title">Export slides</h2></div>'
+      + '<p class="panel__hint">Exports respect the Platform / Region / Date / Search filters set on the browse views.</p>'
+      + '<div class="scopepick">'
+        + '<label><input type="radio" name="exportScope" value="filtered" checked> Current filtered view ('+filteredSlides().length+')</label>'
+        + '<label><input type="radio" name="exportScope" value="all"> All slides ('+slides.length+')</label>'
+      + '</div>'
+      + '<div class="adminpanel__row">'
+        + '<button type="button" class="btn" id="exportPdfBtn">Export as PDF</button>'
+        + '<button type="button" class="btn btn--ghost" id="exportJsonBtn">Export as JSON (for re-import)</button>'
+      + '</div>'
+    + '</div>';
+
   document.getElementById('exportPdfBtn').addEventListener('click', exportPdf);
   document.getElementById('exportJsonBtn').addEventListener('click', exportJson);
+}
 
-  // email digest
+function renderDigestPane(wrap){
+  wrap.innerHTML =
+    '<div class="panel">'
+      + '<div class="panel__head"><h2 class="panel__title">Regional digests</h2></div>'
+      + '<p class="panel__hint">Inline-styled HTML emails that render in Outlook and Gmail with no JavaScript on the reader\'s end, each opening with a "this issue at a glance" summary. Uses the Platform / Date / Search filters; Region is set by the Audience picker below rather than the region chips. Each update links out to its source and, optionally, back to this tool.</p>'
+      + '<div class="fieldrow">'
+        + '<label>Audience<select id="emailAudience">'
+          + '<option value="__all__"'+(state.emailAudience==='__all__'?' selected':'')+'>All regions (grouped by region)</option>'
+          + ALLOWED_REGIONS.map(function(r){ return '<option value="'+esc(r)+'"'+(state.emailAudience===r?' selected':'')+'>'+esc(r)+' only</option>'; }).join('')
+        + '</select></label>'
+        + '<label style="flex:1;min-width:240px;">Digest base URL (optional — for "View full update" links)<input type="text" id="emailBaseUrl" placeholder="https://yourteam.github.io/platform-updates/" value="'+esc(state.emailBaseUrl)+'"></label>'
+      + '</div>'
+      + '<div class="adminpanel__row">'
+        + '<button type="button" class="btn" id="digestPreviewBtn">Preview digest</button>'
+        + '<button type="button" class="btn btn--ghost" id="exportEmailBtn">Download email HTML</button>'
+        + '<button type="button" class="btn btn--ghost" id="exportEmailAllBtn">Download all regional digests (.zip)</button>'
+      + '</div>'
+      + '<div id="digestPreviewWrap"></div>'
+    + '</div>';
+
   document.getElementById('emailAudience').addEventListener('change', function(e){ state.emailAudience = e.target.value; });
   document.getElementById('emailBaseUrl').addEventListener('input', function(e){ state.emailBaseUrl = e.target.value; });
+  document.getElementById('digestPreviewBtn').addEventListener('click', previewRegionalDigest);
   document.getElementById('exportEmailBtn').addEventListener('click', exportEmailDigest);
   document.getElementById('exportEmailAllBtn').addEventListener('click', exportAllRegionalDigests);
+}
 
-  // executive email
+function renderEmailPane(wrap){
+  wrap.innerHTML =
+    '<div class="panel">'
+      + '<div class="panel__head"><h2 class="panel__title">Generate email</h2></div>'
+      + '<p class="panel__hint">A short, leadership-facing briefing: reporting period, an auto-generated summary, per-platform counts and the top updates that need attention — each with a small inline thumbnail (shrunk in-browser so the email stays light) or a platform-coloured badge when a slide has no picture. Set a base URL to make the thumbnails and the "Open Interactive Newsletter" button clickable. When you hit <strong>Copy for email</strong>, the styled briefing — links live, images inline — is placed on your clipboard so it pastes into Gmail or Outlook exactly as previewed.</p>'
+      + '<div class="scopepick">'
+        + '<label><input type="radio" name="execScope" value="filtered" checked> Current filtered view ('+filteredSlides().length+')</label>'
+        + '<label><input type="radio" name="execScope" value="all"> All slides ('+slides.length+')</label>'
+      + '</div>'
+      + '<div class="fieldrow">'
+        + '<label>Top updates to feature<select id="execCriticalCount">'
+          + [3,4,5].map(function(v){ return '<option value="'+v+'"'+(state.execCriticalCount===v?' selected':'')+'>'+v+'</option>'; }).join('')
+        + '</select></label>'
+        + '<label style="flex:1;min-width:240px;">Base URL (optional — makes thumbnails & button clickable)<input type="text" id="emailBaseUrlExec" placeholder="https://yourteam.github.io/platform-updates/" value="'+esc(state.emailBaseUrl)+'"></label>'
+      + '</div>'
+      + '<div class="adminpanel__row">'
+        + '<button type="button" class="btn" id="execGenerateBtn">Generate preview</button>'
+      + '</div>'
+      + '<div id="execPreviewWrap"></div>'
+    + '</div>';
+
+  document.getElementById('emailBaseUrlExec').addEventListener('input', function(e){ state.emailBaseUrl = e.target.value; });
   document.getElementById('execGenerateBtn').addEventListener('click', generateExecEmail);
   if (state.execHtml) renderExecPreview();
-
-  if (state.pptxPreview) renderPptxPreview();
 }
 
 /* ============================================================
@@ -1421,17 +1570,8 @@ function applyUrlParams(){
   if (platform) platform.split(',').forEach(function(p){ var n = normalizePlatformStrict(p.trim()); if (n) state.platforms.add(n); });
   if (from) state.dateFrom = from;
   if (to) state.dateTo = to;
-  if (view === 'region' || view === 'platform') state.view = view;
+  if (view === 'region' || view === 'platform'){ state.view = view; state.nav = view; }
   if (q) state.search = q;
-}
-
-function syncTopbarFromState(){
-  document.getElementById('searchInput').value = state.search;
-  document.querySelectorAll('.viewtoggle__btn').forEach(function(b){
-    var active = b.getAttribute('data-view') === state.view;
-    b.classList.toggle('is-active', active);
-    b.setAttribute('aria-selected', active ? 'true' : 'false');
-  });
 }
 
 function applyHashDeepLink(){
@@ -1440,6 +1580,8 @@ function applyHashDeepLink(){
   var id = decodeURIComponent(m[1]);
   if (!slides.some(function(s){ return s.id === id; })) return;
   state.openCards.add(id);
+  // deep links always land on a browse view
+  if (!isBrowseNav(state.nav)) setNav('platform', { silent:true });
   renderMain();
   setTimeout(function(){
     var el = document.querySelector('.card[data-id="'+id.replace(/"/g,'')+'"]');
@@ -1450,43 +1592,75 @@ function applyHashDeepLink(){
 /* ============================================================
    TOP-LEVEL WIRING
    ============================================================ */
-function renderAll(){
-  renderFilterRail();
-  renderMain();
-  renderAdminPanel();
+// Toggle which surface is visible: the browse feed (filters + cards) or the
+// admin workspace. Keeps the two mutually exclusive so nothing overlaps.
+function applyNavVisibility(){
+  var browse = isBrowseNav(state.nav);
+  document.getElementById('app').classList.toggle('is-hidden', !browse);
+  document.getElementById('filterRail').classList.toggle('is-hidden', !browse);
+  document.getElementById('searchWrap').classList.toggle('is-hidden', !browse);
+  document.getElementById('workspace').hidden = browse;
+
+  var meta = NAV_META[state.nav] || NAV_META.platform;
+  document.getElementById('pageTitle').textContent = meta.title;
+  document.getElementById('pageSub').textContent = meta.sub;
+
+  document.querySelectorAll('.nav__item').forEach(function(btn){
+    btn.classList.toggle('is-active', btn.getAttribute('data-nav') === state.nav);
+  });
 }
 
-function initTopbar(){
-  document.querySelectorAll('.viewtoggle__btn').forEach(function(btn){
-    btn.addEventListener('click', function(){
-      state.view = btn.getAttribute('data-view');
-      document.querySelectorAll('.viewtoggle__btn').forEach(function(b){
-        b.classList.toggle('is-active', b === btn);
-        b.setAttribute('aria-selected', b === btn ? 'true' : 'false');
-      });
-      renderMain();
-    });
+function setNav(nav, opts){
+  opts = opts || {};
+  state.nav = nav;
+  if (isBrowseNav(nav)) state.view = nav;
+  closeSidebar();
+  applyNavVisibility();
+  if (isBrowseNav(nav)){
+    renderFilterRail();
+    renderMain();
+  } else {
+    renderWorkspace();
+  }
+  if (!opts.silent) window.scrollTo({ top:0, behavior:'smooth' });
+}
+
+// re-render whichever surface is currently showing (used after data changes)
+function renderAll(){
+  applyNavVisibility();
+  if (isBrowseNav(state.nav)){
+    renderFilterRail();
+    renderMain();
+  } else {
+    renderWorkspace();
+  }
+}
+
+function openSidebar(){ state.sidebarOpen = true; document.getElementById('sidebar').classList.add('is-open'); document.getElementById('scrim').hidden = false; }
+function closeSidebar(){ state.sidebarOpen = false; document.getElementById('sidebar').classList.remove('is-open'); document.getElementById('scrim').hidden = true; }
+
+function initChrome(){
+  document.querySelectorAll('.nav__item').forEach(function(btn){
+    btn.addEventListener('click', function(){ setNav(btn.getAttribute('data-nav')); });
   });
 
   var search = document.getElementById('searchInput');
   search.addEventListener('input', function(){
     state.search = search.value.trim();
-    renderFilterRail();
-    renderMain();
+    if (isBrowseNav(state.nav)){ renderFilterRail(); renderMain(); }
   });
 
-  document.getElementById('adminToggle').addEventListener('click', function(){
-    state.adminOpen = !state.adminOpen;
-    document.getElementById('adminToggle').classList.toggle('is-active', state.adminOpen);
-    renderAdminPanel();
+  document.getElementById('menuToggle').addEventListener('click', function(){
+    if (state.sidebarOpen) closeSidebar(); else openSidebar();
   });
+  document.getElementById('scrim').addEventListener('click', closeSidebar);
 }
 
 document.addEventListener('DOMContentLoaded', function(){
   applyUrlParams();
-  initTopbar();
-  syncTopbarFromState();
-  renderAll();
+  document.getElementById('searchInput').value = state.search;
+  initChrome();
+  setNav(state.nav, { silent:true });
   applyHashDeepLink();
 });
 
