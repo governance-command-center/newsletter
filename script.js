@@ -1140,10 +1140,44 @@ function slidesForAudience(region){
   });
 }
 
+// Trims to a whole number of SENTENCES, never mid-clause. The old version sliced
+// at a character count, which is what produced hanging fragments like
+// "…currently implemented in La…" in the email.
+//
+// Walks sentence-ending punctuation and keeps whole sentences while they fit
+// under `max`. Always returns at least one complete sentence, even if that one
+// sentence overshoots `max` — an over-long complete thought beats a truncated
+// one. Only falls back to an ellipsis if a single sentence is absurdly long
+// (>2x max), where showing it whole would defeat the point of a summary.
 function shortExcerpt(s, max){
-  var t = excerptOf(s);
-  if (t.length <= max) return t;
-  return t.slice(0, max-1).trim() + '…';
+  var t = (excerptOf(s) || '').trim();
+  if (!t) return '';
+
+  // Split on ., ! or ? followed by whitespace. The lookbehind-free form keeps the
+  // punctuation attached to the sentence it ends.
+  var parts = t.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g) || [t];
+
+  // Drop sentences that are bare lead-ins to a list — "Rights owners can use the
+  // IPPC to:" ends on valid punctuation but is a stub pointing at bullets the
+  // email doesn't show, so it reads as truncated. Keep at least one sentence.
+  var usable = parts.filter(function(p){ return !/:\s*$/.test(p.trim()); });
+  if (usable.length) parts = usable;
+
+  var out = '';
+  for (var i = 0; i < parts.length; i++){
+    var next = out + parts[i];
+    if (out && next.trim().length > max) break;
+    out = next;
+  }
+  out = out.trim();
+
+  if (!out) {
+    // First sentence alone already exceeds max.
+    var first = parts[0].trim();
+    if (first.length <= max * 2) return first;          // let it run — it's whole
+    return first.slice(0, max - 1).replace(/\s+\S*$/, '').trim() + '…';  // last resort, cut on a word
+  }
+  return out;
 }
 
 function toolLink(baseUrl, s){
@@ -1202,30 +1236,16 @@ function buildEmailHtml(list, opts){
       // since the slide body is all the text we hold.
       var linkEl = s.link ? '<a href="'+esc(s.link)+'" style="font-size:13px;font-weight:600;color:#c1440e;text-decoration:none;">Read more &#8594;</a>' : '';
 
-      // "View full update" = expand the slide body inline, right here in the
-      // email. <details> is the only expander that survives an email client
-      // (<script> is always stripped). Outlook desktop ignores it and renders the
-      // body always-open — a degradation, not a break. No base URL needed any
-      // more: this used to be a link back into the tool, which did nothing unless
-      // someone had set a base URL.
-      var full = bodyToEmailHtml(s);
-      var toolEl = full
-        ? '<details style="margin-top:4px;">'
-            + '<summary style="font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#6b6b6b;'
-              + 'cursor:pointer;list-style:none;outline:none;display:inline;">View full update</summary>'
-            + '<div style="border-left:3px solid #e4e1da;padding:12px 0 2px 14px;margin-top:10px;">'
-              + full
-            + '</div>'
-          + '</details>'
-        : '';
-
+      // No inline expander. <details> is ignored by Outlook, which renders the
+      // summary label as dead text and dumps the whole body out beneath it —
+      // the opposite of a shorter email. The body lives on the vendor's page and
+      // in the interactive tool; the email carries a clean summary and a link.
       return ''
         + '<tr><td style="padding:16px 32px;border-bottom:1px solid #e4e1da;font-family:Arial,Helvetica,sans-serif;">'
           + '<div style="font-family:\'Courier New\',monospace;font-size:11px;color:#6b6b6b;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">'+esc(meta)+'</div>'
           + '<div style="font-size:16px;font-weight:700;color:#141414;margin-bottom:6px;line-height:1.3;">'+esc(s.title)+'</div>'
           + '<div style="font-size:15px;color:#333333;line-height:1.6;margin-bottom:9px;">'+esc(shortExcerpt(s,180))+'</div>'
           + linkEl
-          + toolEl
         + '</td></tr>';
     }).join('');
     return ''
@@ -1443,62 +1463,6 @@ function makeThumbnailDataUrl(dataUrl, maxSize){
   });
 }
 
-// Renders a slide's full body as inline-styled email HTML. Mirrors the on-page
-// card renderer but with inline styles only — email clients strip <style> blocks
-// and class-based CSS. Used inside the <details> expansion in the exec email.
-// How many of the featured updates get an expandable full-body <details> block.
-// Kept low on purpose: expanding every critical update inline pushes the email
-// past Gmail's ~102KB clipping threshold, especially alongside base64 thumbnails.
-// The rest keep excerpt + Source link.
-var EXPAND_LIMIT = 3;
-
-function bodyToEmailHtml(s){
-  var FONT = 'font-family:Arial,Helvetica,sans-serif;';
-  var out = [];
-  var bulletBuf = [];
-
-  function flushBullets(){
-    if (!bulletBuf.length) return;
-    out.push('<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 10px;">'
-      + bulletBuf.map(function(t){
-          return '<tr>'
-            + '<td valign="top" style="' + FONT + 'font-size:14px;color:#6b7684;padding:0 8px 5px 0;line-height:1.6;">&bull;</td>'
-            + '<td valign="top" style="' + FONT + 'font-size:14px;color:#4a5568;padding:0 0 5px;line-height:1.6;">' + esc(t) + '</td>'
-          + '</tr>';
-        }).join('')
-      + '</table>');
-    bulletBuf = [];
-  }
-
-  (s.body || []).forEach(function(b){
-    if (b.type === 'bullet'){ bulletBuf.push(b.text); return; }
-    flushBullets();
-
-    if (b.type === 'header'){
-      out.push('<div style="' + FONT + 'font-size:13px;font-weight:700;color:#1b2a4a;margin:14px 0 6px;line-height:1.4;">' + esc(b.text) + '</div>');
-    } else if (b.type === 'para'){
-      out.push('<div style="' + FONT + 'font-size:14px;color:#4a5568;line-height:1.65;margin:0 0 10px;">' + esc(b.text) + '</div>');
-    } else if (b.type === 'table' && b.rows && b.rows.length){
-      var rows = b.rows.map(function(row, ri){
-        var cells = row.map(function(cell){
-          return ri === 0
-            ? '<th align="left" style="' + FONT + 'font-size:12px;font-weight:700;color:#1b2a4a;background:#f4f6f8;border:1px solid #dfe3e8;padding:7px 9px;line-height:1.45;">' + esc(cell) + '</th>'
-            : '<td valign="top" style="' + FONT + 'font-size:12.5px;color:#4a5568;border:1px solid #dfe3e8;padding:7px 9px;line-height:1.5;">' + esc(cell) + '</td>';
-        }).join('');
-        return '<tr>' + cells + '</tr>';
-      }).join('');
-      out.push('<table role="presentation" cellpadding="0" cellspacing="0" '
-        + 'style="border-collapse:collapse;width:100%;margin:0 0 12px;">' + rows + '</table>');
-    }
-    // NOTE: 'image' blocks are deliberately skipped here. The card already shows a
-    // shrunk thumbnail, and inlining every full-res picture is exactly what blows
-    // past Gmail's ~102KB clipping threshold.
-  });
-
-  flushBullets();
-  return out.join('');
-}
-
 function buildExecEmailHtml(list, criticalList, opts){
 
   opts = opts || {};
@@ -1540,29 +1504,6 @@ function buildExecEmailHtml(list, criticalList, opts){
       imgCell = '<div style="width:56px;height:56px;border-radius:6px;background:' + bg + ';color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:20px;font-weight:800;text-align:center;line-height:56px;">' + esc(initial) + '</div>';
     }
 
-    // Expandable full update, top N only (default 3) — see EXPAND_LIMIT below.
-    // <details> is the only expand mechanism that survives an email client, since
-    // <script> is always stripped. In clients that don't support it (Outlook
-    // desktop), it degrades to always-open rather than broken — an acceptable
-    // fallback. `Source →` sits OUTSIDE the <details> so it stays clickable
-    // whether the card is collapsed or expanded.
-    var expandHtml = '';
-    if (i < EXPAND_LIMIT){
-      var full = bodyToEmailHtml(s);
-      if (full){
-        expandHtml =
-          '<details style="margin:8px 0 10px;">'
-            + '<summary style="font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;'
-              + 'color:#1f3a63;cursor:pointer;padding:6px 0;list-style:none;outline:none;">'
-              + 'View full update'
-            + '</summary>'
-            + '<div style="border-left:3px solid #e3e7ec;padding:10px 0 2px 14px;margin-top:8px;">'
-              + full
-            + '</div>'
-          + '</details>';
-      }
-    }
-
     return '<tr><td style="padding:18px 32px;border-bottom:1px solid #e3e7ec;font-family:Arial,Helvetica,sans-serif;">'
       + '<table role="presentation" cellpadding="0" cellspacing="0" width="100%"><tr>'
         + '<td valign="top" style="width:30px;padding-right:10px;">'
@@ -1573,7 +1514,6 @@ function buildExecEmailHtml(list, criticalList, opts){
           + '<div style="font-size:12px;color:#6b7684;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">' + esc(s.platform) + ' &nbsp;&middot;&nbsp; ' + esc(s.region) + (s.date ? ' &nbsp;&middot;&nbsp; ' + esc(fmtDate(s.date)) : '') + '</div>'
           + '<div style="font-size:16px;font-weight:700;color:#1b2a4a;margin-bottom:5px;line-height:1.35;">' + esc(s.title) + '</div>'
           + '<div style="font-size:15px;color:#4a5568;line-height:1.6;margin-bottom:6px;">' + esc(shortExcerpt(s, 150)) + '</div>'
-          + expandHtml
           + linkEl
         + '</td>'
       + '</tr></table>'
@@ -1640,19 +1580,28 @@ function emailBodyFragment(fullHtml){
   var body = /<body[^>]*>([\s\S]*?)<\/body>/i.exec(fullHtml);
   var inner = body ? body[1] : fullHtml;
 
-  // Gmail/Outlook compose windows nest whatever you paste inside their OWN table.
-  // Our outer wrappers are `width:100%` tables carrying the grey page background
-  // and the centring padding — nested inside the compose table, they collapse and
-  // squeeze the content, which is what made the paste look tiny. So we hand the
-  // client the inner 640px card table directly and let it fill the compose width.
+  // The outer wrappers are `width:100%` tables carrying the page background and
+  // the centring padding. Nested inside the compose window's OWN table they
+  // collapse and squeeze the content, so we hand the client the inner card table
+  // directly.
   var card = /<table role="presentation" width="640"[\s\S]*<\/table>/i.exec(inner);
   if (!card) return inner;
 
   var html = card[0];
+
   // Drop the trailing </td></tr></table> tails belonging to the wrappers we cut.
   html = html.replace(/(<\/table>)(?:\s*<\/td>\s*<\/tr>\s*<\/table>)+\s*$/i, '$1');
-  // Guarantee it stretches to the compose width instead of sitting at a fixed 640.
-  html = html.replace(/max-width:640px;width:100%;/, 'width:100%;max-width:640px;');
+
+  // A 640px-wide email body is right for a *received* email, but wrong for a
+  // paste: it leaves the card as a narrow column in a wide compose window. Two
+  // things pin it, and BOTH have to go —
+  //   1. width="640" as an HTML attribute. Outlook renders through Word, which
+  //      honours the attribute over CSS, so this alone keeps it at 640.
+  //   2. max-width:640px in the inline style, which caps it even at width:100%.
+  html = html.replace(/(<table role="presentation")\s+width="640"/i, '$1 width="100%"');
+  html = html.replace(/max-width:640px;\s*/i, '');
+  html = html.replace(/(<table role="presentation" width="100%"[^>]*style=")/i, '$1width:100%;');
+
   return html;
 }
 
