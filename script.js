@@ -1587,12 +1587,33 @@ function buildExecEmailHtml(list, criticalList, opts){
 
     // Thumbnail if the slide has a picture, else the platform square. Both are
     // table-based with bgcolor so Word/Outlook can't drop the fill.
+    //
+    // The thumbnail links to the VENDOR'S page — the same destination as "Read
+    // more". Email clients strip <script>, so a click-to-zoom lightbox is
+    // impossible; a link out is the only thing that can work. This used to link
+    // to the interactive tool via toolLink(baseUrl, s), which meant the image was
+    // a dead, unclickable <img> whenever the Base URL field was left empty (the
+    // usual case). s.link is always present, so this always works.
     var thumb = thumbs[s.id];
-    var tLink = toolLink(baseUrl, s);
     var imgCell;
     if (thumb) {
-      var imgTag = '<img src="' + thumb + '" width="48" height="48" style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid #dfe3e8;display:block;" alt="' + esc(s.title) + '">';
-      imgCell = tLink ? '<a href="' + esc(tLink) + '" style="text-decoration:none;">' + imgTag + '</a>' : imgTag;
+      // 64px, not 48. The slides are dense screenshots; at 48px they were an
+      // unreadable smudge. This is still only a cue — the click is what gets you
+      // the readable version.
+      var imgTag = '<img src="' + thumb + '" width="64" height="64" '
+        + 'style="width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid #dfe3e8;display:block;" '
+        + 'alt="' + esc(s.title) + '">';
+      imgCell = s.link
+        ? '<a href="' + esc(s.link) + '" title="Open the full update on ' + esc(s.platform) + '" style="text-decoration:none;border:0;">'
+            + imgTag
+            // Affordance. A bare image gives no hint that it's clickable, so we
+            // label it. Uses the platform accent to tie it to the row.
+            + '<div style="text-align:center;font-family:Arial,Helvetica,sans-serif;font-size:9.5px;'
+              + 'font-weight:bold;color:' + accent + ';margin-top:4px;letter-spacing:.03em;">'
+              + '<font color="' + accent + '" style="color:' + accent + ';">&#8599; Open</font>'
+            + '</div>'
+          + '</a>'
+        : imgTag;
     } else {
       imgCell = platformBadge(s.platform, 48);
     }
@@ -1610,7 +1631,7 @@ function buildExecEmailHtml(list, criticalList, opts){
           + '<span style="font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:700;color:#c3cad3;">' + (i + 1) + '</span>'
         + '</td>'
 
-        + '<td valign="top" style="padding:18px 14px 18px 12px;width:48px;">' + imgCell + '</td>'
+        + '<td valign="top" style="padding:18px 14px 18px 12px;width:64px;">' + imgCell + '</td>'
 
         + '<td valign="top" style="padding:18px 28px 18px 0;">'
           + '<div style="font-family:Arial,Helvetica,sans-serif;font-size:11.5px;margin-bottom:5px;">' + platformRegionMeta(s) + '</div>'
