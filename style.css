@@ -560,35 +560,70 @@ input[type="file"]{display:none;}
   margin-top:14px;
   border:1px solid var(--line);
   border-radius:8px;
-  max-height:340px;
+  max-height:460px;
   overflow-y:auto;
 }
-.slidelist__row{
-  display:grid;
-  grid-template-columns:auto 200px 1fr;
-  align-items:center;
-  gap:12px;
-  padding:10px 14px;
+.slideedit{
+  padding:12px 14px;
   border-bottom:1px solid var(--line);
-  cursor:pointer;
-  font-size:13px;
 }
-.slidelist__row:last-child{ border-bottom:0; }
-.slidelist__row:hover{ background:rgba(0,0,0,.03); }
-.slidelist__cb{ width:15px; height:15px; cursor:pointer; }
-.slidelist__meta{
-  color:var(--muted);
-  font-size:11px;
+.slideedit:last-child{ border-bottom:0; }
+.slideedit:hover{ background:rgba(0,0,0,.02); }
+.slideedit__top{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin-bottom:9px;
+}
+.slidelist__cb{ width:15px; height:15px; cursor:pointer; flex:none; }
+.slideedit__title{
+  flex:1;
+  font-size:13.5px;
+  font-weight:600;
+  color:var(--ink);
+  padding:7px 9px;
+  border:1px solid var(--line);
+  border-radius:6px;
+  background:#fff;
+}
+.slideedit__grid{
+  display:grid;
+  grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:9px;
+  padding-left:25px;
+}
+.slideedit__grid label{
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+  font-size:10.5px;
   text-transform:uppercase;
   letter-spacing:.05em;
-  white-space:nowrap;
-  overflow:hidden;
-  text-overflow:ellipsis;
+  color:var(--muted);
+  font-weight:600;
 }
-.slidelist__title{ font-weight:600; }
+.slideedit__grid input,
+.slideedit__grid select{
+  font-size:12.5px;
+  color:var(--ink);
+  padding:6px 8px;
+  border:1px solid var(--line);
+  border-radius:6px;
+  background:#fff;
+  font-weight:400;
+  text-transform:none;
+  letter-spacing:0;
+}
+.slideedit__link{ grid-column:1 / -1; }
+.slideedit__title:focus,
+.slideedit__grid input:focus,
+.slideedit__grid select:focus{
+  outline:none;
+  border-color:var(--line-strong);
+  box-shadow:0 0 0 3px rgba(27,42,74,.08);
+}
 
 @media (max-width:640px){
-  .slidelist__row{ grid-template-columns:auto 1fr; }
-  .slidelist__meta{ grid-column:2; }
-  .slidelist__title{ grid-column:2; }
+  .slideedit__grid{ grid-template-columns:1fr 1fr; padding-left:0; }
+  .slideedit__link{ grid-column:1 / -1; }
 }

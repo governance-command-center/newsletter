@@ -9,9 +9,71 @@ var SEED = window.__NEWSLETTER_DATA__ || { allowed_platforms: [], allowed_region
 var ALLOWED_PLATFORMS = SEED.allowed_platforms.slice();
 var ALLOWED_REGIONS   = SEED.allowed_regions.slice();
 
-// live, mutable in-memory store (import/export is the persistence mechanism —
-// nothing is written to browser storage)
+/* ============================================================
+   PERSISTENCE
+   The working set is saved to browser storage so edits, imports and deletions
+   survive a reload. Storage is per-browser and per-device — it is NOT a shared
+   database and NOT a backup. The source deck remains the system of record;
+   "Export as JSON" remains the way to move a working set between machines.
+   Wrapped in try/catch throughout: private-browsing modes and some embedded
+   webviews throw on localStorage access, in which case we fall back silently to
+   the old session-only behaviour rather than breaking the page.
+   ============================================================ */
+var LS_KEY = 'platformUpdates.slides.v1';
+
+function storageAvailable(){
+  try {
+    var t = '__pu_probe__';
+    window.localStorage.setItem(t, '1');
+    window.localStorage.removeItem(t);
+    return true;
+  } catch (e) { return false; }
+}
+var HAS_STORAGE = storageAvailable();
+
+function saveSlides(){
+  if (!HAS_STORAGE) return false;
+  try {
+    window.localStorage.setItem(LS_KEY, JSON.stringify({ savedAt: Date.now(), slides: slides }));
+    return true;
+  } catch (e) {
+    // Most likely the quota: slides carry base64 images and localStorage caps
+    // around 5MB. Tell the truth rather than pretending the save worked.
+    setStatus('Could not save to browser storage — you are probably over the ~5MB limit (slide images are the usual cause). Your changes are still live in this tab, but will be lost on reload. Export as JSON to keep them.', false);
+    return false;
+  }
+}
+
+function loadSavedSlides(){
+  if (!HAS_STORAGE) return null;
+  try {
+    var raw = window.localStorage.getItem(LS_KEY);
+    if (!raw) return null;
+    var parsed = JSON.parse(raw);
+    var arr = Array.isArray(parsed) ? parsed : parsed.slides;
+    if (!Array.isArray(arr) || !arr.length) return null;
+    return { slides: arr, savedAt: parsed.savedAt || null };
+  } catch (e) { return null; }
+}
+
+function clearSavedSlides(){
+  if (!HAS_STORAGE) return;
+  try { window.localStorage.removeItem(LS_KEY); } catch (e) {}
+}
+
+// live, mutable working set. Seeded from the deck baked into index.html, then
+// overridden by anything previously saved to browser storage (see initSlides()).
 var slides = SEED.slides.slice();
+var restoredFrom = null;
+
+function initSlides(){
+  var saved = loadSavedSlides();
+  if (saved){
+    slides = saved.slides;
+    restoredFrom = saved.savedAt;
+  }
+}
+initSlides();
 
 /* ============================================================
    STATE
@@ -366,7 +428,7 @@ function importSlides(raw, sourceLabel){
     added++;
   });
 
-  if (added) renderAll();
+  if (added){ saveSlides(); renderAll(); }
   var msg = added + ' slide'+(added===1?'':'s')+' imported from "'+sourceLabel+'".';
   if (skipped) msg += ' ' + skipped + ' skipped — ' + skippedReasons.slice(0,4).join('; ') + (skippedReasons.length>4 ? '…' : '');
   setStatus(msg, added > 0 && skipped === 0);
@@ -1134,16 +1196,36 @@ function buildEmailHtml(list, opts){
     var items = groups[k];
     var rows = items.map(function(s){
       var meta = groupByRegion ? (s.platform + (s.date ? ' · ' + fmtDate(s.date) : '')) : (s.region + (s.date ? ' · ' + fmtDate(s.date) : ''));
+
+      // "Read more ↗" = the vendor's own page (Lazada Seller Center, TikTok
+      // University, …). This is the only thing that can mean "the whole article",
+      // since the slide body is all the text we hold.
       var linkEl = s.link ? '<a href="'+esc(s.link)+'" style="font-size:13px;font-weight:600;color:#c1440e;text-decoration:none;">Read more &#8594;</a>' : '';
-      var tLink = toolLink(baseUrl, s);
-      var toolEl = tLink ? '<a href="'+esc(tLink)+'" style="font-size:13px;color:#6b6b6b;text-decoration:none;">View full update</a>' : '';
-      var sep = (linkEl && toolEl) ? ' &nbsp;·&nbsp; ' : '';
+
+      // "View full update" = expand the slide body inline, right here in the
+      // email. <details> is the only expander that survives an email client
+      // (<script> is always stripped). Outlook desktop ignores it and renders the
+      // body always-open — a degradation, not a break. No base URL needed any
+      // more: this used to be a link back into the tool, which did nothing unless
+      // someone had set a base URL.
+      var full = bodyToEmailHtml(s);
+      var toolEl = full
+        ? '<details style="margin-top:4px;">'
+            + '<summary style="font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#6b6b6b;'
+              + 'cursor:pointer;list-style:none;outline:none;display:inline;">View full update</summary>'
+            + '<div style="border-left:3px solid #e4e1da;padding:12px 0 2px 14px;margin-top:10px;">'
+              + full
+            + '</div>'
+          + '</details>'
+        : '';
+
       return ''
-        + '<tr><td style="padding:14px 32px;border-bottom:1px solid #e4e1da;font-family:Arial,Helvetica,sans-serif;">'
+        + '<tr><td style="padding:16px 32px;border-bottom:1px solid #e4e1da;font-family:Arial,Helvetica,sans-serif;">'
           + '<div style="font-family:\'Courier New\',monospace;font-size:11px;color:#6b6b6b;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">'+esc(meta)+'</div>'
-          + '<div style="font-size:15px;font-weight:700;color:#141414;margin-bottom:5px;line-height:1.3;">'+esc(s.title)+'</div>'
-          + '<div style="font-size:13.5px;color:#333333;line-height:1.55;margin-bottom:9px;">'+esc(shortExcerpt(s,180))+'</div>'
-          + linkEl + sep + toolEl
+          + '<div style="font-size:16px;font-weight:700;color:#141414;margin-bottom:6px;line-height:1.3;">'+esc(s.title)+'</div>'
+          + '<div style="font-size:15px;color:#333333;line-height:1.6;margin-bottom:9px;">'+esc(shortExcerpt(s,180))+'</div>'
+          + linkEl
+          + toolEl
         + '</td></tr>';
     }).join('');
     return ''
@@ -1436,7 +1518,7 @@ function buildExecEmailHtml(list, criticalList, opts){
   var summaryText = generateExecSummary(list, criticalList);
 
   var criticalHtml = criticalList.map(function(s, i){
-    var linkEl = s.link ? '<a href="' + esc(s.link) + '" style="display:inline-block;font-size:13px;color:#1f3a63;text-decoration:none;font-weight:700;">Source &#8594;</a>' : '';
+    var linkEl = s.link ? '<a href="' + esc(s.link) + '" style="display:inline-block;font-size:13px;color:#1f3a63;text-decoration:none;font-weight:700;">Read more &#8594;</a>' : '';
 
     // Image cell: a real picture (shrunk thumbnail) if the slide has one, else a
     // colored initial-letter placeholder in the platform's brand accent. The
@@ -1472,7 +1554,7 @@ function buildExecEmailHtml(list, criticalList, opts){
           '<details style="margin:8px 0 10px;">'
             + '<summary style="font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;'
               + 'color:#1f3a63;cursor:pointer;padding:6px 0;list-style:none;outline:none;">'
-              + '&#9662; Read full update'
+              + 'View full update'
             + '</summary>'
             + '<div style="border-left:3px solid #e3e7ec;padding:10px 0 2px 14px;margin-top:8px;">'
               + full
@@ -1849,20 +1931,37 @@ function renderExportPane(wrap){
 
     + '<div class="panel">'
       + '<div class="panel__head"><h2 class="panel__title">Manage slides</h2></div>'
-      + '<p class="panel__hint">Tick the updates you want to drop, then remove them. This edits the working set in this browser only &mdash; it does <strong>not</strong> touch the source deck, and a page reload restores the original slides. Export as JSON first if you want to keep the trimmed set.</p>'
+      + '<p class="panel__hint">Fix anything the importer guessed wrong — title, platform, region, date, source link — and it saves to this browser as you go. Tick rows to remove them. '
+        + (HAS_STORAGE
+            ? 'Changes persist across reloads on this device. They are <strong>not</strong> shared with anyone else and are <strong>not</strong> a backup &mdash; export as JSON to move them between machines.'
+            : '<strong>Browser storage is unavailable here, so changes will be lost on reload.</strong> Export as JSON before you close the tab.')
+      + '</p>'
+      + (restoredFrom ? '<p class="panel__hint">Restored '+slides.length+' saved update'+(slides.length===1?'':'s')+' from this browser ('+esc(new Date(restoredFrom).toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}))+').</p>' : '')
       + '<div class="adminpanel__row">'
         + '<button type="button" class="btn btn--ghost" id="selAllBtn">Select all</button>'
         + '<button type="button" class="btn btn--ghost" id="selNoneBtn">Clear selection</button>'
         + '<button type="button" class="btn btn--danger" id="deleteSelBtn">Remove selected (<span id="delCount">0</span>)</button>'
+        + '<button type="button" class="btn btn--ghost" id="resetSeedBtn" style="margin-left:auto;">Reset to source deck</button>'
       + '</div>'
       + '<div class="slidelist" id="slideList">'
         + (slides.length
             ? slides.map(function(s){
-                return '<label class="slidelist__row">'
-                  + '<input type="checkbox" class="slidelist__cb" value="'+esc(s.id)+'"'+(state.selectedForDelete.has(s.id)?' checked':'')+'>'
-                  + '<span class="slidelist__meta">'+esc(s.platform)+' &middot; '+esc(s.region)+(s.date?' &middot; '+esc(fmtDate(s.date)):'')+'</span>'
-                  + '<span class="slidelist__title">'+esc(s.title)+'</span>'
-                + '</label>';
+                return '<div class="slideedit" data-id="'+esc(s.id)+'">'
+                  + '<div class="slideedit__top">'
+                    + '<input type="checkbox" class="slidelist__cb" value="'+esc(s.id)+'"'+(state.selectedForDelete.has(s.id)?' checked':'')+' aria-label="Select for removal">'
+                    + '<input type="text" class="slideedit__title" data-f="title" value="'+esc(s.title)+'" placeholder="Title">'
+                  + '</div>'
+                  + '<div class="slideedit__grid">'
+                    + '<label>Platform<select data-f="platform">'
+                      + ALLOWED_PLATFORMS.map(function(p){ return '<option value="'+esc(p)+'"'+(s.platform===p?' selected':'')+'>'+esc(p)+'</option>'; }).join('')
+                    + '</select></label>'
+                    + '<label>Region<select data-f="region">'
+                      + ALLOWED_REGIONS.map(function(r){ return '<option value="'+esc(r)+'"'+(s.region===r?' selected':'')+'>'+esc(r)+'</option>'; }).join('')
+                    + '</select></label>'
+                    + '<label>Date<input type="date" data-f="date" value="'+esc(s.date||'')+'"></label>'
+                    + '<label class="slideedit__link">Source link<input type="url" data-f="link" value="'+esc(s.link||'')+'" placeholder="https://…"></label>'
+                  + '</div>'
+                + '</div>';
               }).join('')
             : '<p class="panel__hint">No slides loaded.</p>')
       + '</div>'
@@ -1884,6 +1983,30 @@ function renderExportPane(wrap){
     });
   });
 
+  // Inline editing. Committed on 'change' (blur / picker close / select) rather
+  // than every keystroke, so we're not serialising the whole deck on each letter.
+  wrap.querySelectorAll('.slideedit').forEach(function(row){
+    var id = row.getAttribute('data-id');
+    row.querySelectorAll('[data-f]').forEach(function(field){
+      field.addEventListener('change', function(){
+        var s = slides.filter(function(x){ return x.id === id; })[0];
+        if (!s) return;
+        var key = field.getAttribute('data-f');
+        var val = field.value.trim();
+        if (key === 'title' && !val){
+          field.value = s.title;   // titles are required; snap back rather than blank it
+          setStatus('Title cannot be empty.', false);
+          return;
+        }
+        s[key] = val;
+        state.execHtml = null;     // any cached email is now stale
+        state.digestHtml = null;
+        if (saveSlides()) setStatus('Saved — ' + esc(s.title), true);
+        renderAll();
+      });
+    });
+  });
+
   document.getElementById('selAllBtn').addEventListener('click', function(){
     slides.forEach(function(s){ state.selectedForDelete.add(s.id); });
     renderExportPane(wrap);
@@ -1893,10 +2016,24 @@ function renderExportPane(wrap){
     renderExportPane(wrap);
   });
 
+  document.getElementById('resetSeedBtn').addEventListener('click', function(){
+    if (!window.confirm('Discard the saved working set and reload the slides baked into this page?\n\nEvery edit, import and deletion made in this browser will be lost. Export as JSON first if you want to keep them.')) return;
+    clearSavedSlides();
+    slides = SEED.slides.slice();
+    restoredFrom = null;
+    state.selectedForDelete.clear();
+    state.openCards.clear();
+    state.execHtml = null;
+    state.digestHtml = null;
+    renderAll();
+    renderExportPane(wrap);
+    setStatus('Reset to the source deck — ' + slides.length + ' update' + (slides.length===1?'':'s') + '.', true);
+  });
+
   document.getElementById('deleteSelBtn').addEventListener('click', function(){
     var n = state.selectedForDelete.size;
     if (!n){ setStatus('Tick at least one update to remove.', false); return; }
-    if (!window.confirm('Remove ' + n + ' update' + (n===1?'':'s') + ' from the working set?\n\nThis only affects this browser session — the source deck is unchanged, and reloading the page restores them.')) return;
+    if (!window.confirm('Remove ' + n + ' update' + (n===1?'':'s') + ' from the working set?\n\nThis is saved to this browser, so it persists across reloads. The source deck is unchanged. Use "Reset to source deck" to undo.')) return;
 
     slides = slides.filter(function(s){ return !state.selectedForDelete.has(s.id); });
     // Drop any now-dangling references so the browse view and email don't break.
@@ -1905,9 +2042,10 @@ function renderExportPane(wrap){
     state.execHtml = null;
     state.digestHtml = null;
 
+    saveSlides();
     renderAll();
     renderExportPane(wrap);
-    setStatus('Removed ' + n + ' update' + (n===1?'':'s') + '. ' + slides.length + ' remaining. Reload the page to restore the original set.', true);
+    setStatus('Removed ' + n + ' update' + (n===1?'':'s') + '. ' + slides.length + ' remaining, saved to this browser. Use "Reset to source deck" to restore the original set.', true);
   });
 
   refreshCount();
@@ -1923,7 +2061,7 @@ function renderDigestPane(wrap){
           + '<option value="__all__"'+(state.emailAudience==='__all__'?' selected':'')+'>All regions (grouped by region)</option>'
           + ALLOWED_REGIONS.map(function(r){ return '<option value="'+esc(r)+'"'+(state.emailAudience===r?' selected':'')+'>'+esc(r)+' only</option>'; }).join('')
         + '</select></label>'
-        + '<label style="flex:1;min-width:240px;">Digest base URL (optional — for "View full update" links)<input type="text" id="emailBaseUrl" placeholder="https://yourteam.github.io/platform-updates/" value="'+esc(state.emailBaseUrl)+'"></label>'
+        + '<label style="flex:1;min-width:240px;">Digest base URL (optional — adds an "Open the full interactive digest" link)<input type="text" id="emailBaseUrl" placeholder="https://yourteam.github.io/platform-updates/" value="'+esc(state.emailBaseUrl)+'"></label>'
       + '</div>'
       + '<div class="adminpanel__row">'
         + '<button type="button" class="btn" id="digestPreviewBtn">Preview digest</button>'
