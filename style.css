@@ -447,6 +447,24 @@ input[type="file"]{display:none;}
 .pptxrow__meta select, .pptxrow__meta input[type="date"]{font-size:11.5px;padding:5px 7px;border:1px solid var(--line-strong);border-radius:6px;}
 .pptxrow__imgcount{font-family:var(--mono);font-size:10.5px;color:var(--muted);}
 .pptxrow__include{flex:none;margin-top:5px;accent-color:var(--accent);}
+.pptxrow__ok{font-size:11px;margin-top:4px;color:var(--ok-ink);font-weight:600;}
+.pptxrow__ok--soft{color:var(--accent);font-weight:500;}
+.pptxrow__flag{font-size:11px;margin-top:4px;color:var(--err-ink);font-weight:600;}
+
+.pptxsummary{
+  display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;
+  padding:12px 14px;margin-top:14px;
+  background:var(--accent-soft);
+  border:1px solid var(--line);border-radius:var(--radius-sm);
+  font-size:13px;color:var(--ink-soft);
+}
+.pptxsummary__main strong{color:var(--ink);}
+.pptxsummary__ok{color:var(--ok-ink);font-weight:600;}
+.pptxsummary__warn{color:var(--err-ink);font-weight:600;}
+.pptxsummary__toggle{
+  display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-soft);cursor:pointer;white-space:nowrap;
+}
+.pptxsummary__toggle input{accent-color:var(--accent);}
 
 /* ===================== EMAIL PREVIEW ===================== */
 .emailpreview{
@@ -528,4 +546,49 @@ input[type="file"]{display:none;}
   body > *:not(#printArea){display:none !important;}
   #printArea{display:block !important;}
   @page{margin:16mm 14mm;}
+}
+
+/* ---- Manage slides (delete) ---- */
+.btn--danger{
+  background:#b3261e;
+  border-color:#b3261e;
+  color:#fff;
+}
+.btn--danger:hover{ background:#8f1e18; border-color:#8f1e18; }
+
+.slidelist{
+  margin-top:14px;
+  border:1px solid var(--line);
+  border-radius:8px;
+  max-height:340px;
+  overflow-y:auto;
+}
+.slidelist__row{
+  display:grid;
+  grid-template-columns:auto 200px 1fr;
+  align-items:center;
+  gap:12px;
+  padding:10px 14px;
+  border-bottom:1px solid var(--line);
+  cursor:pointer;
+  font-size:13px;
+}
+.slidelist__row:last-child{ border-bottom:0; }
+.slidelist__row:hover{ background:rgba(0,0,0,.03); }
+.slidelist__cb{ width:15px; height:15px; cursor:pointer; }
+.slidelist__meta{
+  color:var(--muted);
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:.05em;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.slidelist__title{ font-weight:600; }
+
+@media (max-width:640px){
+  .slidelist__row{ grid-template-columns:auto 1fr; }
+  .slidelist__meta{ grid-column:2; }
+  .slidelist__title{ grid-column:2; }
 }

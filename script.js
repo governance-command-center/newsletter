@@ -35,7 +35,8 @@ var state = {
   emailBaseUrl: '',
   execHtml: null,             // last generated executive email HTML (for preview/download/copy)
   digestHtml: null,           // last generated regional digest HTML
-  execCriticalCount: 5
+  execCriticalCount: 5,
+  selectedForDelete: new Set()  // slide ids ticked in the Manage/Delete pane
 };
 
 var BROWSE_VIEWS = { platform: true, region: true };
@@ -417,6 +418,88 @@ function normalizePlatformStrict(raw){
   return null;
 }
 
+/* ------------------------------------------------------------------
+   FUZZY, IN-TEXT DETECTION
+   The strict "the whole text box equals a tag" rules almost never fire
+   on real decks — the signal lives *inside* titles and body copy
+   ("Singapore Jun 15-19", "Effective 6 Jul 2026", "(LSP or TikTok Shop)").
+   These helpers scan a whole string for a region / platform / date.
+   ------------------------------------------------------------------ */
+
+// Extra spellings/aliases mapped to a canonical region.
+var REGION_ALIASES = {
+  'indonesia':'Indonesia', 'indo':'Indonesia', 'id':'Indonesia',
+  'malaysia':'Malaysia', 'my':'Malaysia',
+  'philippines':'Philippines', 'philipines':'Philippines', 'phillipines':'Philippines', 'ph':'Philippines', 'pinas':'Philippines',
+  'singapore':'Singapore', 'sg':'Singapore',
+  'thailand':'Thailand', 'th':'Thailand',
+  'vietnam':'Vietnam', 'viet nam':'Vietnam', 'vn':'Vietnam'
+};
+
+// Find the first region named anywhere in a string. `allowShort` enables the
+// 2-letter country codes (SG, MY…), which are only safe on short strings like a
+// divider title — not in prose, where "my"/"id"/"th" appear as English words.
+function findRegionInText(text, allowShort){
+  if (!text) return null;
+  var lower = ' ' + String(text).toLowerCase().replace(/[^a-z ]+/g,' ') + ' ';
+  for (var i=0;i<ALLOWED_REGIONS.length;i++){
+    var name = ALLOWED_REGIONS[i].toLowerCase();
+    if (lower.indexOf(' '+name+' ') !== -1) return ALLOWED_REGIONS[i];
+  }
+  var longAliases = ['philipines','phillipines','viet nam','indo','pinas'];
+  for (var a=0;a<longAliases.length;a++){
+    if (lower.indexOf(' '+longAliases[a]+' ') !== -1) return REGION_ALIASES[longAliases[a]];
+  }
+  if (allowShort){
+    var codes = ['id','my','ph','sg','th','vn'];
+    for (var c=0;c<codes.length;c++){
+      if (lower.indexOf(' '+codes[c]+' ') !== -1) return REGION_ALIASES[codes[c]];
+    }
+  }
+  return null;
+}
+
+// Platform aliases → canonical. Includes common shorthand seen in decks.
+var PLATFORM_ALIASES = {
+  'lazada':'Lazada', 'laz':'Lazada',
+  'shopee':'Shopee', 'shoppee':'Shopee', 'spx':'Shopee',
+  'tiktok':'Tiktok', 'tik tok':'Tiktok', 'tiktok shop':'Tiktok', 'tts':'Tiktok',
+  'zalora':'Zalora'
+};
+function findPlatformInText(text){
+  if (!text) return null;
+  var lower = ' ' + String(text).toLowerCase() + ' ';
+  var keys = Object.keys(PLATFORM_ALIASES).sort(function(a,b){ return b.length - a.length; });
+  for (var i=0;i<keys.length;i++){
+    var k = keys[i];
+    var re = new RegExp('(^|[^a-z])' + k.replace(/ /g,'\\s*') + '([^a-z]|$)', 'i');
+    if (re.test(lower)) return PLATFORM_ALIASES[k];
+  }
+  return null;
+}
+
+// Map a hyperlink domain to a platform, e.g. seller-sg.tiktok.com -> Tiktok.
+function platformFromUrl(url){
+  if (!url) return null;
+  var u = url.toLowerCase();
+  if (u.indexOf('tiktok') !== -1) return 'Tiktok';
+  if (u.indexOf('lazada') !== -1) return 'Lazada';
+  if (u.indexOf('shopee') !== -1) return 'Shopee';
+  if (u.indexOf('zalora') !== -1) return 'Zalora';
+  return null;
+}
+
+// Also pull a region hint from the link's country TLD / subdomain
+// (…tiktok.com/…-sg…, sellercenter.lazada.com.ph, seller.shopee.co.th).
+var TLD_REGION = { ph:'Philippines', sg:'Singapore', my:'Malaysia', th:'Thailand', vn:'Vietnam', id:'Indonesia' };
+function regionFromUrl(url){
+  if (!url) return null;
+  var u = url.toLowerCase();
+  var m = u.match(/\.com\.([a-z]{2})\b/) || u.match(/\.co\.([a-z]{2})\b/) || u.match(/-([a-z]{2})\.tiktok/) || u.match(/seller-([a-z]{2})\./);
+  if (m && TLD_REGION[m[1]]) return TLD_REGION[m[1]];
+  return null;
+}
+
 var MONTHS = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
 
 function parseDateGuess(text, assumedYear){
@@ -428,6 +511,51 @@ function parseDateGuess(text, assumedYear){
     var dd = parseInt(m[2],10);
     var yyyy = m[3] ? parseInt(m[3],10) : (assumedYear || new Date().getFullYear());
     return yyyy + '-' + String(mm).padStart(2,'0') + '-' + String(dd).padStart(2,'0');
+  }
+  return '';
+}
+
+// Finds a date anywhere in a string and returns ISO (start date if a range).
+// Handles "Jun 15 - 19", "6 Jul 2026", "Effective 6 Jul 2026", "2026-07-06",
+// "July 3, 2026" and "15/06/2026". Returns '' if nothing date-like is found.
+function findDateInText(text, assumedYear){
+  if (!text) return '';
+  var t = String(text);
+  var yFallback = assumedYear || new Date().getFullYear();
+
+  // ISO first
+  var iso = t.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return iso[0];
+
+  // "DD Mon [YYYY]" (day-first) e.g. "6 Jul 2026" — tried BEFORE month-first so
+  // "Jul 2026" can't be misread as month=Jul, day=20.
+  var df = t.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?(?:\s*,?\s*(\d{4}))?/i);
+  if (df){
+    var mm2 = MONTHS[df[2].toLowerCase().slice(0,3)];
+    var dd2 = parseInt(df[1],10);
+    var yy2 = df[3] ? parseInt(df[3],10) : yFallback;
+    if (dd2 >= 1 && dd2 <= 31)
+      return yy2 + '-' + String(mm2).padStart(2,'0') + '-' + String(dd2).padStart(2,'0');
+  }
+
+  // "Mon DD[ - DD]" (month-first), optional year. The (?!\d) stops the day from
+  // swallowing the first two digits of a following 4-digit year.
+  var mf = t.match(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(\d{1,2})(?!\d)(?:st|nd|rd|th)?(?:\s*[–—-]\s*\d{1,2})?(?:\s*,?\s*(\d{4}))?/i);
+  if (mf){
+    var mm = MONTHS[mf[1].toLowerCase().slice(0,3)];
+    var dd = parseInt(mf[2],10);
+    var yy = mf[3] ? parseInt(mf[3],10) : yFallback;
+    if (dd >= 1 && dd <= 31)
+      return yy + '-' + String(mm).padStart(2,'0') + '-' + String(dd).padStart(2,'0');
+  }
+
+  // numeric DD/MM/YYYY or D/M/YY
+  var num = t.match(/\b(\d{1,2})[\/.](\d{1,2})[\/.](\d{2,4})\b/);
+  if (num){
+    var d3 = parseInt(num[1],10), m3 = parseInt(num[2],10), y3 = parseInt(num[3],10);
+    if (y3 < 100) y3 += 2000;
+    if (m3 >= 1 && m3 <= 12 && d3 >= 1 && d3 <= 31)
+      return y3 + '-' + String(m3).padStart(2,'0') + '-' + String(d3).padStart(2,'0');
   }
   return '';
 }
@@ -524,22 +652,53 @@ async function parsePptx(file){
   var sectionOf = await getSectionMap(zip, parser);
   var results = [];
 
+  // Region/date carried forward from the most recent "divider" slide, so update
+  // slides that don't restate their region still inherit it.
+  var runningRegion = null;
+  var runningDate = '';
+
+  // Best-guess year for bare "Jun 15" style dates: the most common recent 4-digit
+  // year appearing across the deck, else the current year.
+  var deckYear = new Date().getFullYear();
+  try {
+    var yearCounts = {};
+    for (var yp=0; yp<slidePaths.length; yp++){
+      var yt = await zip.file(slidePaths[yp]).async('text');
+      (yt.match(/\b(20\d{2})\b/g) || []).forEach(function(y){
+        var n = parseInt(y,10);
+        if (n >= 2015 && n <= new Date().getFullYear()+1) yearCounts[n] = (yearCounts[n]||0)+1;
+      });
+    }
+    var best = null, bestN = 0;
+    Object.keys(yearCounts).forEach(function(y){ if (yearCounts[y] > bestN){ bestN = yearCounts[y]; best = parseInt(y,10); } });
+    if (best) deckYear = best;
+  } catch(e){ /* keep default */ }
+
   for (var i=0; i<slidePaths.length; i++){
     var path = slidePaths[i];
     var slideNum = parseInt(path.match(/slide(\d+)\.xml/)[1],10);
     var xmlStr = await zip.file(path).async('text');
     var xml = parser.parseFromString(xmlStr, 'application/xml');
 
-    // relationships (for resolving image r:embed ids)
+    // relationships (for resolving image r:embed ids AND external hyperlinks)
     var relsPath = path.replace('slides/', 'slides/_rels/') + '.rels';
     var relMap = {};
+    var hyperlinks = [];   // external URLs referenced anywhere on the slide
     if (zip.file(relsPath)){
       var relXmlStr = await zip.file(relsPath).async('text');
       var relXml = parser.parseFromString(relXmlStr, 'application/xml');
       relXml.querySelectorAll('Relationship').forEach(function(r){
-        relMap[r.getAttribute('Id')] = r.getAttribute('Target');
+        var id = r.getAttribute('Id');
+        var target = r.getAttribute('Target');
+        relMap[id] = target;
+        var type = r.getAttribute('Type') || '';
+        var mode = r.getAttribute('TargetMode') || '';
+        if ((/hyperlink/i.test(type) || mode === 'External') && /^https?:\/\//i.test(target || '')){
+          hyperlinks.push(target);
+        }
       });
     }
+    var slideLink = hyperlinks.length ? hyperlinks[0] : '';
 
     // walk top-level shape tree in document order for text + tables + pics
     var body = [];
@@ -605,19 +764,76 @@ async function parsePptx(file){
 
     images.forEach(function(img){ body.push({ type: 'image', file: img.file, dataUrl: img.dataUrl }); });
 
+    // ---- Pull every scrap of text we can match against ----
+    var bodyText = body.map(function(b){ return b.text || ''; }).join('  ');
+    var allText  = (titleText + '  ' + bodyText).trim();
+
     var sectionInfo = sectionOf[path] ? parseSectionName(sectionOf[path]) : null;
-    var finalRegion = detectedRegion || (sectionInfo && sectionInfo.region) || null;
-    var finalDate = detectedDate || (sectionInfo && sectionInfo.date) || '';
-    var finalPlatform = detectedPlatform || 'Others';
+
+    // A "divider" slide is short, names a region, and has little/no body — the
+    // classic section-header slide ("Singapore  Jun 15 - 19", or just "Malaysia").
+    // It sets the running region/date for the slides that follow, and is skipped
+    // itself. It also covers the case where a standalone region text box was
+    // already consumed above into detectedRegion, leaving titleText empty.
+    var titleRegionShort = findRegionInText(titleText, true) || detectedRegion;
+    var hasContent = body.length || images.length;
+    var isDivider = !hasContent && !!titleRegionShort && (titleText.length < 60);
+
+    // ---- REGION: own detection first, then carry-forward, then link/section ----
+    var ownRegion =
+        detectedRegion
+        || (sectionInfo && sectionInfo.region)
+        || findRegionInText(titleText, true)      // short: allow "SG"/"MY"
+        || regionFromUrl(slideLink)
+        || findRegionInText(bodyText, false);     // prose: full names only
+
+    if (isDivider){
+      runningRegion = titleRegionShort;
+      var ddate = detectedDate || (sectionInfo && sectionInfo.date) || findDateInText(titleText, deckYear);
+      runningDate = ddate || '';   // reset so a new section doesn't keep the old date
+      continue; // don't import the divider slide itself
+    }
+
+    var finalRegion = ownRegion || runningRegion || null;
+    var regionInherited = !ownRegion && !!finalRegion;
+
+    // ---- DATE: own detection first. Only fall back to the divider's running
+    // date when this slide is actually part of that carried-over section
+    // (i.e. it didn't state its own region), so a new region can't inherit a
+    // previous section's dates.
+    var finalDate =
+        detectedDate
+        || (sectionInfo && sectionInfo.date)
+        || findDateInText(titleText, deckYear)
+        || findDateInText(bodyText, deckYear)
+        || (regionInherited ? runningDate : '')
+        || '';
+
+    // ---- PLATFORM: explicit tag, else link domain, else text mention ----
+    var finalPlatform =
+        detectedPlatform
+        || platformFromUrl(slideLink)
+        || findPlatformInText(titleText)
+        || findPlatformInText(bodyText)
+        || 'Others';
+    var platformDetected = !!(detectedPlatform || platformFromUrl(slideLink) || findPlatformInText(allText));
+
+    // ---- TITLE cleanup: strip the "(LINK)" marker and a leading region label ----
+    var cleanTitle = (titleText || ('Slide ' + slideNum))
+      .replace(/\s*\(link\)\s*$/i, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
 
     results.push({
       slide_num: slideNum,
-      title: titleText || ('Slide ' + slideNum),
+      title: cleanTitle,
       body: body,
+      link: slideLink,
       thumb: images.length ? images[0].dataUrl : null,
       platform: finalPlatform,
-      platformDetected: !!detectedPlatform,
+      platformDetected: platformDetected,
       region: finalRegion,
+      regionInherited: regionInherited,   // flag carry-forward for the UI
       date: finalDate,
       sectionName: sectionOf[path] || ''
     });
@@ -630,18 +846,39 @@ function renderPptxPreview(){
   var container = document.getElementById('pptxPreviewWrap');
   if (!state.pptxPreview){ container.innerHTML = ''; return; }
 
-  var undetectedRegions = state.pptxPreview.filter(function(i){ return !i.region; }).length;
-  state.pptxPreview.forEach(function(item){ if (item.include === undefined) item.include = !!item.region; });
+  var all = state.pptxPreview;
+  var needsRegion = all.filter(function(i){ return !i.region; }).length;
+  var readyCount  = all.length - needsRegion;
+  all.forEach(function(item){ if (item.include === undefined) item.include = !!item.region; });
 
-  var rowsHtml = state.pptxPreview.map(function(item, idx){
+  if (state.pptxOnlyIssues === undefined) state.pptxOnlyIssues = false;
+
+  var rows = all.map(function(item, idx){ return { item:item, idx:idx }; });
+  if (state.pptxOnlyIssues) rows = rows.filter(function(r){ return !r.item.region; });
+
+  var rowsHtml = rows.map(function(r){
+    var item = r.item, idx = r.idx;
     var thumb = item.thumb
       ? '<img class="pptxrow__thumb" src="'+item.thumb+'" alt="">'
       : '<div class="pptxrow__thumb pptxrow__thumb--empty">no image</div>';
     var imgCount = item.body.filter(function(b){ return b.type==='image'; }).length;
     var regionOptions = (item.region ? '' : '<option value="" selected disabled>Select region…</option>') + optionsHtml(ALLOWED_REGIONS, item.region);
-    var regionWarn = item.region ? '' : '<div style="color:#a3301a;font-size:11px;margin-top:3px;">⚠ Region not detected (no matching Section or tag) — select one before importing.</div>';
-    var platNote = item.platformDetected ? '' : '<span style="font-family:var(--mono);font-size:10px;color:var(--muted);">(defaulted)</span>';
+
+    // Region status note: error only when nothing was found; otherwise a quiet
+    // "auto-detected" / "inherited from divider" confirmation.
+    var regionNote;
+    if (!item.region){
+      regionNote = '<div class="pptxrow__flag">&#9888; Region not found in this slide &mdash; pick one, or it&#8217;ll be skipped.</div>';
+    } else if (item.regionInherited){
+      regionNote = '<div class="pptxrow__ok pptxrow__ok--soft">&#8618; Region carried over from the section divider</div>';
+    } else {
+      regionNote = '<div class="pptxrow__ok">&#10003; Read from the slide</div>';
+    }
+
+    var platNote = item.platformDetected ? '' : '<span class="pptxrow__imgcount">(defaulted)</span>';
+    var linkNote = item.link ? '<span class="pptxrow__imgcount">&#128279; link</span>' : '';
     var sourceNote = item.sectionName ? '<span class="pptxrow__imgcount">Section: '+esc(item.sectionName)+'</span>' : '';
+
     return '<div class="pptxrow'+(item.region?'':' pptxrow--warn')+'" data-idx="'+idx+'">'
       + thumb
       + '<input type="checkbox" class="pptxrow__include" data-idx="'+idx+'" '+(item.include===false?'':'checked')+'>'
@@ -652,20 +889,34 @@ function renderPptxPreview(){
           + '<select data-idx="'+idx+'" data-field="region">'+regionOptions+'</select>'
           + '<input type="date" data-idx="'+idx+'" data-field="date" value="'+esc(item.date)+'">'
           + (imgCount ? '<span class="pptxrow__imgcount">'+imgCount+' image'+(imgCount===1?'':'s')+'</span>' : '')
+          + linkNote
           + sourceNote
         + '</div>'
-        + regionWarn
+        + regionNote
       + '</div>'
     + '</div>';
   }).join('');
 
-  container.innerHTML =
-    '<div class="pptxpreview">'+rowsHtml+'</div>'
-    + '<div class="adminpanel__row" style="margin-top:10px;">'
-      + '<button type="button" class="btn" id="pptxConfirmBtn">Import selected slides</button>'
-      + '<span style="font-size:12px;color:var(--muted);">'+state.pptxPreview.length+' slide'+(state.pptxPreview.length===1?'':'s')+' found'
-        + (undetectedRegions ? ' · '+undetectedRegions+' need'+(undetectedRegions===1?'s':'')+' a region' : '')+'</span>'
+  var summary =
+    '<div class="pptxsummary">'
+      + '<div class="pptxsummary__main">'
+        + '<strong>'+all.length+'</strong> slide'+(all.length===1?'':'s')+' read'
+        + ' &nbsp;&middot;&nbsp; <span class="pptxsummary__ok">'+readyCount+' ready to import</span>'
+        + (needsRegion ? ' &nbsp;&middot;&nbsp; <span class="pptxsummary__warn">'+needsRegion+' need a region</span>' : ' &nbsp;&middot;&nbsp; region, platform &amp; date detected automatically')
+      + '</div>'
+      + (needsRegion ? '<label class="pptxsummary__toggle"><input type="checkbox" id="pptxOnlyIssues"'+(state.pptxOnlyIssues?' checked':'')+'> Show only slides needing a region</label>' : '')
     + '</div>';
+
+  container.innerHTML =
+    summary
+    + '<div class="pptxpreview">'+(rowsHtml || '<div style="padding:16px;color:var(--muted);font-size:13px;">Nothing to show with this filter.</div>')+'</div>'
+    + '<div class="adminpanel__row" style="margin-top:12px;align-items:center;">'
+      + '<button type="button" class="btn" id="pptxConfirmBtn">Import '+readyCount+' ready slide'+(readyCount===1?'':'s')+'</button>'
+      + (needsRegion ? '<span style="font-size:12px;color:var(--muted);">'+needsRegion+' slide'+(needsRegion===1?'':'s')+' without a region will be skipped unless you set one.</span>' : '')
+    + '</div>';
+
+  var onlyToggle = document.getElementById('pptxOnlyIssues');
+  if (onlyToggle) onlyToggle.addEventListener('change', function(){ state.pptxOnlyIssues = onlyToggle.checked; renderPptxPreview(); });
 
   container.querySelectorAll('.pptxrow__title').forEach(function(el){
     el.addEventListener('input', function(){ state.pptxPreview[+el.dataset.idx].title = el.value; });
@@ -673,7 +924,11 @@ function renderPptxPreview(){
   container.querySelectorAll('select[data-field]').forEach(function(el){
     el.addEventListener('change', function(){
       state.pptxPreview[+el.dataset.idx][el.dataset.field] = el.value;
-      if (el.dataset.field === 'region') renderPptxPreview();
+      if (el.dataset.field === 'region'){
+        state.pptxPreview[+el.dataset.idx].regionInherited = false;
+        state.pptxPreview[+el.dataset.idx].include = true;
+        renderPptxPreview();
+      }
     });
   });
   container.querySelectorAll('input[type="date"][data-field]').forEach(function(el){
@@ -700,7 +955,7 @@ function confirmPptxImport(){
       date: item.date || '',
       date_range: '',
       title: item.title || ('Slide ' + item.slide_num),
-      link: '',
+      link: item.link || '',
       body: item.body,
       slide_num: nextSlideNum()
     });
@@ -1106,6 +1361,62 @@ function makeThumbnailDataUrl(dataUrl, maxSize){
   });
 }
 
+// Renders a slide's full body as inline-styled email HTML. Mirrors the on-page
+// card renderer but with inline styles only — email clients strip <style> blocks
+// and class-based CSS. Used inside the <details> expansion in the exec email.
+// How many of the featured updates get an expandable full-body <details> block.
+// Kept low on purpose: expanding every critical update inline pushes the email
+// past Gmail's ~102KB clipping threshold, especially alongside base64 thumbnails.
+// The rest keep excerpt + Source link.
+var EXPAND_LIMIT = 3;
+
+function bodyToEmailHtml(s){
+  var FONT = 'font-family:Arial,Helvetica,sans-serif;';
+  var out = [];
+  var bulletBuf = [];
+
+  function flushBullets(){
+    if (!bulletBuf.length) return;
+    out.push('<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 10px;">'
+      + bulletBuf.map(function(t){
+          return '<tr>'
+            + '<td valign="top" style="' + FONT + 'font-size:14px;color:#6b7684;padding:0 8px 5px 0;line-height:1.6;">&bull;</td>'
+            + '<td valign="top" style="' + FONT + 'font-size:14px;color:#4a5568;padding:0 0 5px;line-height:1.6;">' + esc(t) + '</td>'
+          + '</tr>';
+        }).join('')
+      + '</table>');
+    bulletBuf = [];
+  }
+
+  (s.body || []).forEach(function(b){
+    if (b.type === 'bullet'){ bulletBuf.push(b.text); return; }
+    flushBullets();
+
+    if (b.type === 'header'){
+      out.push('<div style="' + FONT + 'font-size:13px;font-weight:700;color:#1b2a4a;margin:14px 0 6px;line-height:1.4;">' + esc(b.text) + '</div>');
+    } else if (b.type === 'para'){
+      out.push('<div style="' + FONT + 'font-size:14px;color:#4a5568;line-height:1.65;margin:0 0 10px;">' + esc(b.text) + '</div>');
+    } else if (b.type === 'table' && b.rows && b.rows.length){
+      var rows = b.rows.map(function(row, ri){
+        var cells = row.map(function(cell){
+          return ri === 0
+            ? '<th align="left" style="' + FONT + 'font-size:12px;font-weight:700;color:#1b2a4a;background:#f4f6f8;border:1px solid #dfe3e8;padding:7px 9px;line-height:1.45;">' + esc(cell) + '</th>'
+            : '<td valign="top" style="' + FONT + 'font-size:12.5px;color:#4a5568;border:1px solid #dfe3e8;padding:7px 9px;line-height:1.5;">' + esc(cell) + '</td>';
+        }).join('');
+        return '<tr>' + cells + '</tr>';
+      }).join('');
+      out.push('<table role="presentation" cellpadding="0" cellspacing="0" '
+        + 'style="border-collapse:collapse;width:100%;margin:0 0 12px;">' + rows + '</table>');
+    }
+    // NOTE: 'image' blocks are deliberately skipped here. The card already shows a
+    // shrunk thumbnail, and inlining every full-res picture is exactly what blows
+    // past Gmail's ~102KB clipping threshold.
+  });
+
+  flushBullets();
+  return out.join('');
+}
+
 function buildExecEmailHtml(list, criticalList, opts){
 
   opts = opts || {};
@@ -1118,14 +1429,14 @@ function buildExecEmailHtml(list, criticalList, opts){
   var countsHtml = ALLOWED_PLATFORMS.filter(function(p){ return platformCounts[p]; }).map(function(p){
     return '<td style="padding:0 22px 0 0;">'
       + '<div style="font-size:21px;font-weight:800;color:#1b2a4a;font-family:Arial,Helvetica,sans-serif;line-height:1;">' + platformCounts[p] + '</div>'
-      + '<div style="font-size:10.5px;color:#6b7684;text-transform:uppercase;letter-spacing:.06em;font-family:Arial,Helvetica,sans-serif;margin-top:3px;">' + esc(p) + '</div>'
+      + '<div style="font-size:12px;color:#6b7684;text-transform:uppercase;letter-spacing:.06em;font-family:Arial,Helvetica,sans-serif;margin-top:3px;">' + esc(p) + '</div>'
     + '</td>';
   }).join('');
 
   var summaryText = generateExecSummary(list, criticalList);
 
   var criticalHtml = criticalList.map(function(s, i){
-    var linkEl = s.link ? '<a href="' + esc(s.link) + '" style="font-size:12px;color:#1f3a63;text-decoration:none;font-weight:700;">Source &#8594;</a>' : '';
+    var linkEl = s.link ? '<a href="' + esc(s.link) + '" style="display:inline-block;font-size:13px;color:#1f3a63;text-decoration:none;font-weight:700;">Source &#8594;</a>' : '';
 
     // Image cell: a real picture (shrunk thumbnail) if the slide has one, else a
     // colored initial-letter placeholder in the platform's brand accent. The
@@ -1147,16 +1458,40 @@ function buildExecEmailHtml(list, criticalList, opts){
       imgCell = '<div style="width:56px;height:56px;border-radius:6px;background:' + bg + ';color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:20px;font-weight:800;text-align:center;line-height:56px;">' + esc(initial) + '</div>';
     }
 
-    return '<tr><td style="padding:16px 32px;border-bottom:1px solid #e3e7ec;font-family:Arial,Helvetica,sans-serif;">'
-      + '<table role="presentation" cellpadding="0" cellspacing="0"><tr>'
-        + '<td valign="top" style="width:28px;padding-right:10px;">'
-          + '<div style="width:22px;height:22px;border-radius:50%;background:#1b2a4a;color:#ffffff;font-size:11px;font-weight:700;text-align:center;line-height:22px;">' + (i + 1) + '</div>'
+    // Expandable full update, top N only (default 3) — see EXPAND_LIMIT below.
+    // <details> is the only expand mechanism that survives an email client, since
+    // <script> is always stripped. In clients that don't support it (Outlook
+    // desktop), it degrades to always-open rather than broken — an acceptable
+    // fallback. `Source →` sits OUTSIDE the <details> so it stays clickable
+    // whether the card is collapsed or expanded.
+    var expandHtml = '';
+    if (i < EXPAND_LIMIT){
+      var full = bodyToEmailHtml(s);
+      if (full){
+        expandHtml =
+          '<details style="margin:8px 0 10px;">'
+            + '<summary style="font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;'
+              + 'color:#1f3a63;cursor:pointer;padding:6px 0;list-style:none;outline:none;">'
+              + '&#9662; Read full update'
+            + '</summary>'
+            + '<div style="border-left:3px solid #e3e7ec;padding:10px 0 2px 14px;margin-top:8px;">'
+              + full
+            + '</div>'
+          + '</details>';
+      }
+    }
+
+    return '<tr><td style="padding:18px 32px;border-bottom:1px solid #e3e7ec;font-family:Arial,Helvetica,sans-serif;">'
+      + '<table role="presentation" cellpadding="0" cellspacing="0" width="100%"><tr>'
+        + '<td valign="top" style="width:30px;padding-right:10px;">'
+          + '<div style="width:24px;height:24px;border-radius:50%;background:#1b2a4a;color:#ffffff;font-size:12px;font-weight:700;text-align:center;line-height:24px;">' + (i + 1) + '</div>'
         + '</td>'
-        + '<td valign="top" style="width:66px;padding-right:12px;">' + imgCell + '</td>'
+        + '<td valign="top" style="width:68px;padding-right:12px;">' + imgCell + '</td>'
         + '<td valign="top">'
-          + '<div style="font-size:10.5px;color:#6b7684;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;">' + esc(s.platform) + ' &nbsp;&middot;&nbsp; ' + esc(s.region) + (s.date ? ' &nbsp;&middot;&nbsp; ' + esc(fmtDate(s.date)) : '') + '</div>'
-          + '<div style="font-size:14.5px;font-weight:700;color:#1b2a4a;margin-bottom:4px;line-height:1.35;">' + esc(s.title) + '</div>'
-          + '<div style="font-size:13px;color:#4a5568;line-height:1.55;margin-bottom:6px;">' + esc(shortExcerpt(s, 150)) + '</div>'
+          + '<div style="font-size:12px;color:#6b7684;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">' + esc(s.platform) + ' &nbsp;&middot;&nbsp; ' + esc(s.region) + (s.date ? ' &nbsp;&middot;&nbsp; ' + esc(fmtDate(s.date)) : '') + '</div>'
+          + '<div style="font-size:16px;font-weight:700;color:#1b2a4a;margin-bottom:5px;line-height:1.35;">' + esc(s.title) + '</div>'
+          + '<div style="font-size:15px;color:#4a5568;line-height:1.6;margin-bottom:6px;">' + esc(shortExcerpt(s, 150)) + '</div>'
+          + expandHtml
           + linkEl
         + '</td>'
       + '</tr></table>'
@@ -1181,7 +1516,7 @@ function buildExecEmailHtml(list, criticalList, opts){
     + '<tr><td style="background:#1b2a4a;padding:30px 32px;font-family:Arial,Helvetica,sans-serif;">'
       + '<div style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#8fa3c7;">Executive Briefing</div>'
       + '<div style="font-size:25px;font-weight:800;color:#ffffff;margin-top:6px;">Platform Updates</div>'
-      + '<div style="font-size:13px;color:#c3ceda;margin-top:6px;">Reporting period: ' + esc(periodLabel) + '</div>'
+      + '<div style="font-size:14px;color:#c3ceda;margin-top:6px;">Reporting period: ' + esc(periodLabel) + '</div>'
     + '</td></tr>'
 
     + (countsHtml ? '<tr><td style="padding:20px 32px 18px;border-bottom:1px solid #e3e7ec;">'
@@ -1189,19 +1524,19 @@ function buildExecEmailHtml(list, criticalList, opts){
       + '</td></tr>' : '')
 
     + '<tr><td style="padding:22px 32px;font-family:Arial,Helvetica,sans-serif;">'
-      + '<div style="font-size:11.5px;font-weight:700;color:#1b2a4a;text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;">Executive Summary</div>'
-      + '<div style="font-size:13.5px;color:#3d4552;line-height:1.65;background:#f4f6f8;border-left:3px solid #1b2a4a;padding:14px 16px;">' + esc(summaryText) + '</div>'
+      + '<div style="font-size:13px;font-weight:700;color:#1b2a4a;text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;">Executive Summary</div>'
+      + '<div style="font-size:15px;color:#3d4552;line-height:1.65;background:#f4f6f8;border-left:3px solid #1b2a4a;padding:16px 18px;">' + esc(summaryText) + '</div>'
     + '</td></tr>'
 
     + (criticalHtml ? '<tr><td style="padding:6px 32px 2px;font-family:Arial,Helvetica,sans-serif;">'
-        + '<div style="font-size:11.5px;font-weight:700;color:#1b2a4a;text-transform:uppercase;letter-spacing:.07em;">Top Updates Requiring Attention</div>'
+        + '<div style="font-size:13px;font-weight:700;color:#1b2a4a;text-transform:uppercase;letter-spacing:.07em;">Top Updates Requiring Attention</div>'
       + '</td></tr>' + criticalHtml : '')
 
     + ctaHtml
 
     + '<tr><td style="padding:22px 32px 28px;border-top:1px solid #e3e7ec;font-family:Arial,Helvetica,sans-serif;">'
-      + '<div style="font-size:11.5px;color:#6b7684;">' + list.length + ' total update' + (list.length === 1 ? '' : 's') + ' this period &nbsp;&middot;&nbsp; Generated ' + esc(stamp) + '</div>'
-      + '<div style="font-size:10.5px;color:#9aa4b1;margin-top:4px;">Automatically generated. Flag issues to the PIC.</div>'
+      + '<div style="font-size:12.5px;color:#6b7684;">' + list.length + ' total update' + (list.length === 1 ? '' : 's') + ' this period &nbsp;&middot;&nbsp; Generated ' + esc(stamp) + '</div>'
+      + '<div style="font-size:11.5px;color:#9aa4b1;margin-top:4px;">Automatically generated. Flag issues to the PIC.</div>'
     + '</td></tr>'
 
   + '</table>'
@@ -1220,8 +1555,23 @@ function currentExecScope(){
 // get stripped or double-wrapped. The fragment keeps every inline style, link
 // and inline base64 image intact — which is what makes the paste look identical.
 function emailBodyFragment(fullHtml){
-  var m = /<body[^>]*>([\s\S]*?)<\/body>/i.exec(fullHtml);
-  return m ? m[1] : fullHtml;
+  var body = /<body[^>]*>([\s\S]*?)<\/body>/i.exec(fullHtml);
+  var inner = body ? body[1] : fullHtml;
+
+  // Gmail/Outlook compose windows nest whatever you paste inside their OWN table.
+  // Our outer wrappers are `width:100%` tables carrying the grey page background
+  // and the centring padding — nested inside the compose table, they collapse and
+  // squeeze the content, which is what made the paste look tiny. So we hand the
+  // client the inner 640px card table directly and let it fill the compose width.
+  var card = /<table role="presentation" width="640"[\s\S]*<\/table>/i.exec(inner);
+  if (!card) return inner;
+
+  var html = card[0];
+  // Drop the trailing </td></tr></table> tails belonging to the wrappers we cut.
+  html = html.replace(/(<\/table>)(?:\s*<\/td>\s*<\/tr>\s*<\/table>)+\s*$/i, '$1');
+  // Guarantee it stretches to the compose width instead of sitting at a fixed 640.
+  html = html.replace(/max-width:640px;width:100%;/, 'width:100%;max-width:640px;');
+  return html;
 }
 
 // Writes the styled email to the clipboard as BOTH rich HTML and plain text.
@@ -1495,10 +1845,72 @@ function renderExportPane(wrap){
         + '<button type="button" class="btn" id="exportPdfBtn">Export as PDF</button>'
         + '<button type="button" class="btn btn--ghost" id="exportJsonBtn">Export as JSON (for re-import)</button>'
       + '</div>'
+    + '</div>'
+
+    + '<div class="panel">'
+      + '<div class="panel__head"><h2 class="panel__title">Manage slides</h2></div>'
+      + '<p class="panel__hint">Tick the updates you want to drop, then remove them. This edits the working set in this browser only &mdash; it does <strong>not</strong> touch the source deck, and a page reload restores the original slides. Export as JSON first if you want to keep the trimmed set.</p>'
+      + '<div class="adminpanel__row">'
+        + '<button type="button" class="btn btn--ghost" id="selAllBtn">Select all</button>'
+        + '<button type="button" class="btn btn--ghost" id="selNoneBtn">Clear selection</button>'
+        + '<button type="button" class="btn btn--danger" id="deleteSelBtn">Remove selected (<span id="delCount">0</span>)</button>'
+      + '</div>'
+      + '<div class="slidelist" id="slideList">'
+        + (slides.length
+            ? slides.map(function(s){
+                return '<label class="slidelist__row">'
+                  + '<input type="checkbox" class="slidelist__cb" value="'+esc(s.id)+'"'+(state.selectedForDelete.has(s.id)?' checked':'')+'>'
+                  + '<span class="slidelist__meta">'+esc(s.platform)+' &middot; '+esc(s.region)+(s.date?' &middot; '+esc(fmtDate(s.date)):'')+'</span>'
+                  + '<span class="slidelist__title">'+esc(s.title)+'</span>'
+                + '</label>';
+              }).join('')
+            : '<p class="panel__hint">No slides loaded.</p>')
+      + '</div>'
     + '</div>';
 
   document.getElementById('exportPdfBtn').addEventListener('click', exportPdf);
   document.getElementById('exportJsonBtn').addEventListener('click', exportJson);
+
+  function refreshCount(){
+    var el = document.getElementById('delCount');
+    if (el) el.textContent = state.selectedForDelete.size;
+  }
+
+  wrap.querySelectorAll('.slidelist__cb').forEach(function(cb){
+    cb.addEventListener('change', function(){
+      if (cb.checked) state.selectedForDelete.add(cb.value);
+      else state.selectedForDelete.delete(cb.value);
+      refreshCount();
+    });
+  });
+
+  document.getElementById('selAllBtn').addEventListener('click', function(){
+    slides.forEach(function(s){ state.selectedForDelete.add(s.id); });
+    renderExportPane(wrap);
+  });
+  document.getElementById('selNoneBtn').addEventListener('click', function(){
+    state.selectedForDelete.clear();
+    renderExportPane(wrap);
+  });
+
+  document.getElementById('deleteSelBtn').addEventListener('click', function(){
+    var n = state.selectedForDelete.size;
+    if (!n){ setStatus('Tick at least one update to remove.', false); return; }
+    if (!window.confirm('Remove ' + n + ' update' + (n===1?'':'s') + ' from the working set?\n\nThis only affects this browser session — the source deck is unchanged, and reloading the page restores them.')) return;
+
+    slides = slides.filter(function(s){ return !state.selectedForDelete.has(s.id); });
+    // Drop any now-dangling references so the browse view and email don't break.
+    state.selectedForDelete.forEach(function(id){ state.openCards.delete(id); });
+    state.selectedForDelete.clear();
+    state.execHtml = null;
+    state.digestHtml = null;
+
+    renderAll();
+    renderExportPane(wrap);
+    setStatus('Removed ' + n + ' update' + (n===1?'':'s') + '. ' + slides.length + ' remaining. Reload the page to restore the original set.', true);
+  });
+
+  refreshCount();
 }
 
 function renderDigestPane(wrap){
