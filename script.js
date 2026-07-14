@@ -1229,23 +1229,27 @@ function buildEmailHtml(list, opts){
   var itemsHtml = order.map(function(k){
     var items = groups[k];
     var rows = items.map(function(s){
-      var meta = groupByRegion ? (s.platform + (s.date ? ' · ' + fmtDate(s.date) : '')) : (s.region + (s.date ? ' · ' + fmtDate(s.date) : ''));
-
-      // "Read more ↗" = the vendor's own page (Lazada Seller Center, TikTok
-      // University, …). This is the only thing that can mean "the whole article",
-      // since the slide body is all the text we hold.
-      var linkEl = s.link ? '<a href="'+esc(s.link)+'" style="font-size:13px;font-weight:600;color:#c1440e;text-decoration:none;">Read more &#8594;</a>' : '';
+      var accent = PLATFORM_BADGE_COLOR[s.platform] || '#1b2a4a';
+      var linkEl = s.link
+        ? '<a href="'+esc(s.link)+'" style="font-size:13px;font-weight:700;color:'+accent+';text-decoration:none;">Read more &#8594;</a>'
+        : '';
 
       // No inline expander. <details> is ignored by Outlook, which renders the
       // summary label as dead text and dumps the whole body out beneath it —
       // the opposite of a shorter email. The body lives on the vendor's page and
       // in the interactive tool; the email carries a clean summary and a link.
       return ''
-        + '<tr><td style="padding:16px 32px;border-bottom:1px solid #e4e1da;font-family:Arial,Helvetica,sans-serif;">'
-          + '<div style="font-family:\'Courier New\',monospace;font-size:11px;color:#6b6b6b;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">'+esc(meta)+'</div>'
-          + '<div style="font-size:16px;font-weight:700;color:#141414;margin-bottom:6px;line-height:1.3;">'+esc(s.title)+'</div>'
-          + '<div style="font-size:15px;color:#333333;line-height:1.6;margin-bottom:9px;">'+esc(shortExcerpt(s,180))+'</div>'
-          + linkEl
+        + '<tr><td style="padding:0;border-bottom:1px solid #e4e1da;font-family:Arial,Helvetica,sans-serif;">'
+          + '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;"><tr>'
+            + '<td bgcolor="'+accent+'" width="4" style="background-color:'+accent+';width:4px;font-size:0;line-height:0;">&nbsp;</td>'
+            + '<td valign="top" style="padding:16px 12px 16px 18px;width:40px;">' + platformBadge(s.platform, 40) + '</td>'
+            + '<td valign="top" style="padding:16px 28px 16px 0;">'
+              + '<div style="font-family:Arial,Helvetica,sans-serif;font-size:11.5px;margin-bottom:5px;">' + platformRegionMeta(s) + '</div>'
+              + '<div style="font-size:16px;font-weight:700;color:#141414;margin-bottom:6px;line-height:1.3;">'+esc(s.title)+'</div>'
+              + '<div style="font-size:15px;color:#333333;line-height:1.6;margin-bottom:8px;">'+esc(shortExcerpt(s,180))+'</div>'
+              + linkEl
+            + '</td>'
+          + '</tr></table>'
         + '</td></tr>';
     }).join('');
     return ''
@@ -1428,12 +1432,17 @@ function generateExecSummary(list, criticalList){
 // Same brand-accent colors used by the on-screen card badges (see .card__badge in
 // style.css) — reused here so a slide with no picture still gets a recognisable,
 // on-brand placeholder instead of a blank box or a scraped/trademarked logo.
+// Platform brand colours. These drive the square badge, the left accent stripe,
+// the platform label and the "Read more" link, so one glance tells you the
+// marketplace. Lazada's true brand navy (#0f146d) is so dark it reads as black
+// next to TikTok's, defeating the point — so we use a brighter blue that stays
+// recognisably Lazada while being unmistakably NOT TikTok.
 var PLATFORM_BADGE_COLOR = {
-  Lazada: '#0f146d',
-  Shopee: '#ee4d2d',
-  Tiktok: '#111111',
-  Zalora: '#111111',
-  Others: '#6b6b6b'
+  Lazada: '#1a56db',   // blue
+  Shopee: '#ee4d2d',   // orange
+  Tiktok: '#111111',   // black
+  Zalora: '#7b1fa2',   // purple — was black, i.e. identical to TikTok
+  Others: '#6b7684'    // grey
 };
 
 function firstSlideImage(s){
@@ -1463,6 +1472,41 @@ function makeThumbnailDataUrl(dataUrl, maxSize){
   });
 }
 
+// Renders the platform square. This MUST be a <table> with a bgcolor attribute
+// on the <td> — not a <div> with a CSS background. Outlook renders through Word,
+// which silently drops `background` on a div inside a table cell, which is why
+// the badges were showing as bare letters (L, T, S) on a white card. The
+// bgcolor ATTRIBUTE is the only fill Word reliably honours.
+function platformBadge(platform, size){
+  size = size || 48;
+  var bg = PLATFORM_BADGE_COLOR[platform] || '#1b2a4a';
+  var initial = (platform || '?').charAt(0).toUpperCase();
+  return '<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
+      + 'width="' + size + '" height="' + size + '" style="border-collapse:collapse;">'
+    + '<tr>'
+      + '<td bgcolor="' + bg + '" align="center" valign="middle" '
+        + 'width="' + size + '" height="' + size + '" '
+        + 'style="background-color:' + bg + ';width:' + size + 'px;height:' + size + 'px;'
+        + 'border-radius:6px;color:#ffffff;font-family:Arial,Helvetica,sans-serif;'
+        + 'font-size:' + Math.round(size * 0.42) + 'px;font-weight:700;text-align:center;'
+        + 'line-height:' + size + 'px;mso-line-height-rule:exactly;">'
+        + esc(initial)
+      + '</td>'
+    + '</tr>'
+  + '</table>';
+}
+
+// Platform name in its brand colour, region in bold. Gives the eye two separate
+// hooks — colour for "which marketplace", weight for "which market" — instead of
+// one flat grey meta line where everything reads the same.
+function platformRegionMeta(s){
+  var color = PLATFORM_BADGE_COLOR[s.platform] || '#1b2a4a';
+  return '<span style="color:' + color + ';font-weight:700;text-transform:uppercase;letter-spacing:.06em;">' + esc(s.platform) + '</span>'
+    + '<span style="color:#c3cad3;">&nbsp;|&nbsp;</span>'
+    + '<span style="color:#2d3748;font-weight:700;">' + esc(s.region) + '</span>'
+    + (s.date ? '<span style="color:#8f9aa8;font-weight:400;">&nbsp;&middot;&nbsp;' + esc(fmtDate(s.date)) + '</span>' : '');
+}
+
 function buildExecEmailHtml(list, criticalList, opts){
 
   opts = opts || {};
@@ -1473,49 +1517,60 @@ function buildExecEmailHtml(list, criticalList, opts){
   var platformCounts = {};
   list.forEach(function(s){ platformCounts[s.platform] = (platformCounts[s.platform] || 0) + 1; });
   var countsHtml = ALLOWED_PLATFORMS.filter(function(p){ return platformCounts[p]; }).map(function(p){
-    return '<td style="padding:0 22px 0 0;">'
-      + '<div style="font-size:21px;font-weight:800;color:#1b2a4a;font-family:Arial,Helvetica,sans-serif;line-height:1;">' + platformCounts[p] + '</div>'
-      + '<div style="font-size:12px;color:#6b7684;text-transform:uppercase;letter-spacing:.06em;font-family:Arial,Helvetica,sans-serif;margin-top:3px;">' + esc(p) + '</div>'
+    var c = PLATFORM_BADGE_COLOR[p] || '#1b2a4a';
+    return '<td valign="top" style="padding:0 10px 0 0;">'
+      + '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>'
+        + '<td bgcolor="' + c + '" width="3" style="background-color:' + c + ';width:3px;font-size:0;line-height:0;">&nbsp;</td>'
+        + '<td style="padding:0 18px 0 8px;">'
+          + '<div style="font-size:22px;font-weight:800;color:' + c + ';font-family:Arial,Helvetica,sans-serif;line-height:1;">' + platformCounts[p] + '</div>'
+          + '<div style="font-size:11px;color:#6b7684;text-transform:uppercase;letter-spacing:.06em;font-family:Arial,Helvetica,sans-serif;margin-top:4px;font-weight:700;">' + esc(p) + '</div>'
+        + '</td>'
+      + '</tr></table>'
     + '</td>';
   }).join('');
 
   var summaryText = generateExecSummary(list, criticalList);
 
   var criticalHtml = criticalList.map(function(s, i){
-    var linkEl = s.link ? '<a href="' + esc(s.link) + '" style="display:inline-block;font-size:13px;color:#1f3a63;text-decoration:none;font-weight:700;">Read more &#8594;</a>' : '';
+    var accent = PLATFORM_BADGE_COLOR[s.platform] || '#1b2a4a';
+    var linkEl = s.link
+      ? '<a href="' + esc(s.link) + '" style="display:inline-block;font-size:13px;color:' + accent + ';text-decoration:none;font-weight:700;">Read more &#8594;</a>'
+      : '';
 
-    // Image cell: a real picture (shrunk thumbnail) if the slide has one, else a
-    // colored initial-letter placeholder in the platform's brand accent. The
-    // thumbnail links back into the interactive tool, deep-linked to this exact
-    // update, where the full-resolution picture renders — that's the "zoom": a
-    // normal link rather than a JS lightbox, since email clients strip <script>.
+    // Thumbnail if the slide has a picture, else the platform square. Both are
+    // table-based with bgcolor so Word/Outlook can't drop the fill.
     var thumb = thumbs[s.id];
     var tLink = toolLink(baseUrl, s);
     var imgCell;
     if (thumb) {
-      var imgTag = '<img src="' + thumb + '" width="56" height="56" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid #dfe3e8;display:block;" alt="' + esc(s.title) + '">';
-      imgCell = tLink
-        ? '<a href="' + esc(tLink) + '" style="text-decoration:none;">' + imgTag + '</a>'
-          + '<div style="text-align:center;font-size:9px;color:#6b7684;margin-top:3px;font-family:Arial,Helvetica,sans-serif;">&#128269; Zoom</div>'
-        : imgTag;
+      var imgTag = '<img src="' + thumb + '" width="48" height="48" style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid #dfe3e8;display:block;" alt="' + esc(s.title) + '">';
+      imgCell = tLink ? '<a href="' + esc(tLink) + '" style="text-decoration:none;">' + imgTag + '</a>' : imgTag;
     } else {
-      var initial = (s.platform || '?').charAt(0);
-      var bg = PLATFORM_BADGE_COLOR[s.platform] || '#1b2a4a';
-      imgCell = '<div style="width:56px;height:56px;border-radius:6px;background:' + bg + ';color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:20px;font-weight:800;text-align:center;line-height:56px;">' + esc(initial) + '</div>';
+      imgCell = platformBadge(s.platform, 48);
     }
 
-    return '<tr><td style="padding:18px 32px;border-bottom:1px solid #e3e7ec;font-family:Arial,Helvetica,sans-serif;">'
-      + '<table role="presentation" cellpadding="0" cellspacing="0" width="100%"><tr>'
-        + '<td valign="top" style="width:30px;padding-right:10px;">'
-          + '<div style="width:24px;height:24px;border-radius:50%;background:#1b2a4a;color:#ffffff;font-size:12px;font-weight:700;text-align:center;line-height:24px;">' + (i + 1) + '</div>'
+    // The row is a 4-column table: accent stripe | rank | badge | content.
+    // The stripe is a 4px bgcolor <td> in the platform's brand colour — it gives
+    // the list a scannable left edge, so you can tell Shopee from TikTok from
+    // Lazada without reading a word.
+    return '<tr><td style="padding:0;border-bottom:1px solid #e3e7ec;font-family:Arial,Helvetica,sans-serif;">'
+      + '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;"><tr>'
+
+        + '<td bgcolor="' + accent + '" width="4" style="background-color:' + accent + ';width:4px;font-size:0;line-height:0;">&nbsp;</td>'
+
+        + '<td valign="top" style="padding:18px 0 18px 18px;width:26px;">'
+          + '<span style="font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:700;color:#c3cad3;">' + (i + 1) + '</span>'
         + '</td>'
-        + '<td valign="top" style="width:68px;padding-right:12px;">' + imgCell + '</td>'
-        + '<td valign="top">'
-          + '<div style="font-size:12px;color:#6b7684;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">' + esc(s.platform) + ' &nbsp;&middot;&nbsp; ' + esc(s.region) + (s.date ? ' &nbsp;&middot;&nbsp; ' + esc(fmtDate(s.date)) : '') + '</div>'
+
+        + '<td valign="top" style="padding:18px 14px 18px 12px;width:48px;">' + imgCell + '</td>'
+
+        + '<td valign="top" style="padding:18px 28px 18px 0;">'
+          + '<div style="font-family:Arial,Helvetica,sans-serif;font-size:11.5px;margin-bottom:5px;">' + platformRegionMeta(s) + '</div>'
           + '<div style="font-size:16px;font-weight:700;color:#1b2a4a;margin-bottom:5px;line-height:1.35;">' + esc(s.title) + '</div>'
-          + '<div style="font-size:15px;color:#4a5568;line-height:1.6;margin-bottom:6px;">' + esc(shortExcerpt(s, 150)) + '</div>'
+          + '<div style="font-size:15px;color:#4a5568;line-height:1.6;margin-bottom:8px;">' + esc(shortExcerpt(s, 150)) + '</div>'
           + linkEl
         + '</td>'
+
       + '</tr></table>'
     + '</td></tr>';
   }).join('');
@@ -1547,7 +1602,10 @@ function buildExecEmailHtml(list, criticalList, opts){
 
     + '<tr><td style="padding:22px 32px;font-family:Arial,Helvetica,sans-serif;">'
       + '<div style="font-size:13px;font-weight:700;color:#1b2a4a;text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;">Executive Summary</div>'
-      + '<div style="font-size:15px;color:#3d4552;line-height:1.65;background:#f4f6f8;border-left:3px solid #1b2a4a;padding:16px 18px;">' + esc(summaryText) + '</div>'
+      + '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;"><tr>'
+        + '<td bgcolor="#1b2a4a" width="3" style="background-color:#1b2a4a;width:3px;font-size:0;line-height:0;">&nbsp;</td>'
+        + '<td bgcolor="#f4f6f8" style="background-color:#f4f6f8;padding:16px 18px;font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#3d4552;line-height:1.65;">' + esc(summaryText) + '</td>'
+      + '</tr></table>'
     + '</td></tr>'
 
     + (criticalHtml ? '<tr><td style="padding:6px 32px 2px;font-family:Arial,Helvetica,sans-serif;">'
