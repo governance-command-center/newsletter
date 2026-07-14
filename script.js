@@ -1231,7 +1231,8 @@ function buildEmailHtml(list, opts){
     var rows = items.map(function(s){
       var accent = PLATFORM_BADGE_COLOR[s.platform] || '#1b2a4a';
       var linkEl = s.link
-        ? '<a href="'+esc(s.link)+'" style="font-size:13px;font-weight:700;color:'+accent+';text-decoration:none;">Read more &#8594;</a>'
+        ? '<a href="'+esc(s.link)+'" style="font-size:13px;font-weight:bold;color:'+accent+';text-decoration:none;">'
+            + '<font color="'+accent+'" style="color:'+accent+';">Read more &#8594;</font></a>'
         : '';
 
       // No inline expander. <details> is ignored by Outlook, which renders the
@@ -1262,7 +1263,9 @@ function buildEmailHtml(list, opts){
   var digestLink = baseUrl ? '<a href="'+esc(baseUrl)+'" style="font-size:12.5px;color:#c1440e;text-decoration:none;font-weight:600;">Open the full interactive digest &#8594;</a>' : '';
 
   return '<!doctype html>'
-+ '<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">'
++ '<html xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word">'
++ '<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">'
++ '<!--[if mso]><xml><o:OfficeDocumentSettings><o:AllowPNG/><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml><![endif]-->'
 + '<title>Platform Updates — '+esc(audienceLabel)+'</title></head>'
 + '<body style="margin:0;padding:0;background:#f2f0eb;">'
 + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f2f0eb;"><tr><td align="center" style="padding:24px 12px;">'
@@ -1472,39 +1475,82 @@ function makeThumbnailDataUrl(dataUrl, maxSize){
   });
 }
 
-// Renders the platform square. This MUST be a <table> with a bgcolor attribute
-// on the <td> — not a <div> with a CSS background. Outlook renders through Word,
-// which silently drops `background` on a div inside a table cell, which is why
-// the badges were showing as bare letters (L, T, S) on a white card. The
-// bgcolor ATTRIBUTE is the only fill Word reliably honours.
+// Renders the platform square.
+//
+// Three things Word/Outlook breaks, and how each is worked around:
+//
+//  1. FILL — `background:` on a <div> is dropped. Fixed with a bgcolor ATTRIBUTE
+//     on a <td>, the only fill Word honours.
+//  2. CENTERING — line-height centering is ignored; Word drops the glyph to the
+//     bottom-left. Fixed with align="center" + valign="middle" ATTRIBUTES on the
+//     <td> (not CSS), plus mso-line-height-rule:exactly.
+//  3. ROUNDED CORNERS — border-radius does not exist in Word. The ONLY way to get
+//     a rounded shape in Outlook is VML. So we emit a VML roundrect wrapped in
+//     <!--[if mso]>, and hide the HTML version from Outlook with <![if !mso]>.
+//     Every other client sees the clean HTML table with a real border-radius.
 function platformBadge(platform, size){
   size = size || 48;
   var bg = PLATFORM_BADGE_COLOR[platform] || '#1b2a4a';
   var initial = (platform || '?').charAt(0).toUpperCase();
-  return '<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
-      + 'width="' + size + '" height="' + size + '" style="border-collapse:collapse;">'
-    + '<tr>'
-      + '<td bgcolor="' + bg + '" align="center" valign="middle" '
+  var fontPx = Math.round(size * 0.46);
+  var radius = Math.round(size * 0.22);          // ~22% — a soft square, not a pill
+  var arc = (radius / size).toFixed(2);          // VML wants the radius as a ratio
+
+  return ''
+    // ---- Outlook only: VML rounded rectangle ----
+    + '<!--[if mso]>'
+      + '<v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" '
+        + 'style="width:' + size + 'px;height:' + size + 'px;v-text-anchor:middle;" '
+        + 'arcsize="' + Math.round(arc * 100) + '%" stroke="f" fillcolor="' + bg + '">'
+        + '<w:anchorlock/>'
+        + '<center style="color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:' + fontPx + 'px;font-weight:bold;">'
+          + esc(initial)
+        + '</center>'
+      + '</v:roundrect>'
+    + '<![endif]-->'
+
+    // ---- Everyone else: HTML table with a real border-radius ----
+    + '<!--[if !mso]><!-->'
+      + '<table role="presentation" cellpadding="0" cellspacing="0" border="0" '
         + 'width="' + size + '" height="' + size + '" '
-        + 'style="background-color:' + bg + ';width:' + size + 'px;height:' + size + 'px;'
-        + 'border-radius:6px;color:#ffffff;font-family:Arial,Helvetica,sans-serif;'
-        + 'font-size:' + Math.round(size * 0.42) + 'px;font-weight:700;text-align:center;'
-        + 'line-height:' + size + 'px;mso-line-height-rule:exactly;">'
-        + esc(initial)
-      + '</td>'
-    + '</tr>'
-  + '</table>';
+        + 'style="border-collapse:separate;border-radius:' + radius + 'px;overflow:hidden;">'
+        + '<tr>'
+          + '<td bgcolor="' + bg + '" align="center" valign="middle" '
+            + 'width="' + size + '" height="' + size + '" '
+            + 'style="background-color:' + bg + ';width:' + size + 'px;height:' + size + 'px;'
+            + 'border-radius:' + radius + 'px;text-align:center;vertical-align:middle;'
+            + 'color:#ffffff;font-family:Arial,Helvetica,sans-serif;'
+            + 'font-size:' + fontPx + 'px;font-weight:bold;line-height:1;'
+            + 'mso-line-height-rule:exactly;">'
+            + esc(initial)
+          + '</td>'
+        + '</tr>'
+      + '</table>'
+    + '<!--<![endif]-->';
 }
 
-// Platform name in its brand colour, region in bold. Gives the eye two separate
-// hooks — colour for "which marketplace", weight for "which market" — instead of
-// one flat grey meta line where everything reads the same.
+// Platform name in its brand colour, region in bold. Two hooks for the eye:
+// colour for "which marketplace", weight for "which market".
+//
+// The colour is applied with BOTH a <font color> attribute and a CSS `color` —
+// Word/Outlook drops `color` on a bare <span> often enough that the platform
+// names were coming through flat black. The <font> attribute is deprecated in
+// modern HTML but it is exactly what Word's renderer respects, so in email it is
+// the reliable one; the CSS covers every other client.
 function platformRegionMeta(s){
   var color = PLATFORM_BADGE_COLOR[s.platform] || '#1b2a4a';
-  return '<span style="color:' + color + ';font-weight:700;text-transform:uppercase;letter-spacing:.06em;">' + esc(s.platform) + '</span>'
-    + '<span style="color:#c3cad3;">&nbsp;|&nbsp;</span>'
-    + '<span style="color:#2d3748;font-weight:700;">' + esc(s.region) + '</span>'
-    + (s.date ? '<span style="color:#8f9aa8;font-weight:400;">&nbsp;&middot;&nbsp;' + esc(fmtDate(s.date)) + '</span>' : '');
+  return '<font color="' + color + '" style="color:' + color + ';">'
+      + '<span style="color:' + color + ';font-weight:bold;text-transform:uppercase;letter-spacing:.06em;">' + esc(s.platform) + '</span>'
+    + '</font>'
+    + '<font color="#c3cad3" style="color:#c3cad3;">&nbsp;|&nbsp;</font>'
+    + '<font color="#2d3748" style="color:#2d3748;">'
+      + '<span style="color:#2d3748;font-weight:bold;">' + esc(s.region) + '</span>'
+    + '</font>'
+    + (s.date
+        ? '<font color="#8f9aa8" style="color:#8f9aa8;">'
+            + '<span style="color:#8f9aa8;font-weight:normal;">&nbsp;&middot;&nbsp;' + esc(fmtDate(s.date)) + '</span>'
+          + '</font>'
+        : '');
 }
 
 function buildExecEmailHtml(list, criticalList, opts){
@@ -1522,7 +1568,8 @@ function buildExecEmailHtml(list, criticalList, opts){
       + '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>'
         + '<td bgcolor="' + c + '" width="3" style="background-color:' + c + ';width:3px;font-size:0;line-height:0;">&nbsp;</td>'
         + '<td style="padding:0 18px 0 8px;">'
-          + '<div style="font-size:22px;font-weight:800;color:' + c + ';font-family:Arial,Helvetica,sans-serif;line-height:1;">' + platformCounts[p] + '</div>'
+          + '<div style="font-size:22px;font-weight:bold;color:' + c + ';font-family:Arial,Helvetica,sans-serif;line-height:1;">'
+            + '<font color="' + c + '" style="color:' + c + ';">' + platformCounts[p] + '</font></div>'
           + '<div style="font-size:11px;color:#6b7684;text-transform:uppercase;letter-spacing:.06em;font-family:Arial,Helvetica,sans-serif;margin-top:4px;font-weight:700;">' + esc(p) + '</div>'
         + '</td>'
       + '</tr></table>'
@@ -1534,7 +1581,8 @@ function buildExecEmailHtml(list, criticalList, opts){
   var criticalHtml = criticalList.map(function(s, i){
     var accent = PLATFORM_BADGE_COLOR[s.platform] || '#1b2a4a';
     var linkEl = s.link
-      ? '<a href="' + esc(s.link) + '" style="display:inline-block;font-size:13px;color:' + accent + ';text-decoration:none;font-weight:700;">Read more &#8594;</a>'
+      ? '<a href="' + esc(s.link) + '" style="display:inline-block;font-size:13px;color:' + accent + ';text-decoration:none;font-weight:bold;">'
+          + '<font color="' + accent + '" style="color:' + accent + ';">Read more &#8594;</font></a>'
       : '';
 
     // Thumbnail if the slide has a picture, else the platform square. Both are
@@ -1584,7 +1632,9 @@ function buildExecEmailHtml(list, criticalList, opts){
   var stamp = new Date().toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
   return '<!doctype html>'
-  + '<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">'
+  + '<html xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word">'
++ '<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">'
++ '<!--[if mso]><xml><o:OfficeDocumentSettings><o:AllowPNG/><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml><![endif]-->'
   + '<title>Platform Updates — Executive Briefing</title></head>'
   + '<body style="margin:0;padding:0;background:#eef1f4;">'
   + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f4;"><tr><td align="center" style="padding:28px 12px;">'
