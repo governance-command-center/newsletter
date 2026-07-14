@@ -97,7 +97,6 @@ var state = {
   emailBaseUrl: '',
   execHtml: null,             // last generated executive email HTML (for preview/download/copy)
   digestHtml: null,           // last generated regional digest HTML
-  execCriticalCount: 5,
   selectedForDelete: new Set()  // slide ids ticked in the Manage/Delete pane
 };
 
@@ -1392,13 +1391,16 @@ function scoreCriticality(s){
   return score;
 }
 
+// Ranks the list by criticality (most urgent first). Pass `n` to cap the result;
+// omit it to get every update back, still in ranked order.
 function pickCriticalUpdates(list, n){
   var scored = list.map(function(s){ return { s: s, score: scoreCriticality(s) }; });
   scored.sort(function(a, b){
     if (b.score !== a.score) return b.score - a.score;
     return (b.s.date || '').localeCompare(a.s.date || ''); // ties: most recent first
   });
-  return scored.slice(0, Math.min(n, scored.length)).map(function(x){ return x.s; });
+  var ranked = scored.map(function(x){ return x.s; });
+  return (typeof n === 'number' && n > 0) ? ranked.slice(0, n) : ranked;
 }
 
 var EXEC_THEMES = [
@@ -1425,8 +1427,10 @@ function generateExecSummary(list, criticalList){
     ? 'The main areas of focus are ' + themeHits.join(', ').replace(/, ([^,]*)$/, ' and $1') + '.'
     : '';
 
-  var s3 = criticalList.length
-    ? criticalList.length + ' update' + (criticalList.length === 1 ? ' is' : 's are') + ' flagged below as needing closer attention from sellers.'
+  // Every update in scope is listed below, so this sentence describes the
+  // ordering rather than re-stating the count from s1.
+  var s3 = criticalList.length > 1
+    ? 'All ' + criticalList.length + ' are listed below, ordered with the ones needing closest attention from sellers first.'
     : '';
 
   return [s1, s2, s3].filter(Boolean).join(' ');
@@ -1877,9 +1881,8 @@ async function generateExecEmail(){
     return;
   }
 
-  var n = parseInt(document.getElementById('execCriticalCount').value, 10) || 5;
-  state.execCriticalCount = n;
-  var criticalList = pickCriticalUpdates(list, n);
+  // Feature every update in scope, ordered by criticality (most urgent first).
+  var criticalList = pickCriticalUpdates(list);
 
   var baseUrlEl = document.getElementById('emailBaseUrl');
   var baseUrl = baseUrlEl ? baseUrlEl.value.trim() : '';
@@ -1900,7 +1903,7 @@ async function generateExecEmail(){
   state.execHtml = buildExecEmailHtml(list, criticalList, { periodLabel: periodLabel, baseUrl: baseUrl, thumbs: thumbs });
   renderExecPreview();
   var withImageCount = Object.keys(thumbs).length;
-  setStatus('Generated the executive email — ' + list.length + ' update' + (list.length === 1 ? '' : 's') + ', ' + criticalList.length + ' flagged as critical' + (withImageCount ? ' (' + withImageCount + ' with a thumbnail, the rest with a platform badge)' : '') + '.', true);
+  setStatus('Generated the executive email — all ' + list.length + ' update' + (list.length === 1 ? '' : 's') + ' included, ordered by urgency' + (withImageCount ? ' (' + withImageCount + ' with a thumbnail, the rest with a platform badge)' : '') + '.', true);
 }
 
 /* ============================================================
@@ -2166,9 +2169,6 @@ function renderEmailPane(wrap){
         + '<label><input type="radio" name="execScope" value="all"> All slides ('+slides.length+')</label>'
       + '</div>'
       + '<div class="fieldrow">'
-        + '<label>Top updates to feature<select id="execCriticalCount">'
-          + [3,4,5].map(function(v){ return '<option value="'+v+'"'+(state.execCriticalCount===v?' selected':'')+'>'+v+'</option>'; }).join('')
-        + '</select></label>'
         + '<label style="flex:1;min-width:240px;">Base URL (optional — makes thumbnails & button clickable)<input type="text" id="emailBaseUrlExec" placeholder="https://yourteam.github.io/platform-updates/" value="'+esc(state.emailBaseUrl)+'"></label>'
       + '</div>'
       + '<div class="adminpanel__row">'
