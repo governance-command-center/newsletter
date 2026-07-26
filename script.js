@@ -97,7 +97,9 @@ var state = {
   emailBaseUrl: '',
   execHtml: null,             // last generated executive email HTML (for preview/download/copy)
   digestHtml: null,           // last generated regional digest HTML
-  selectedForDelete: new Set()  // slide ids ticked in the Manage/Delete pane
+  selectedForDelete: new Set(),  // slide ids ticked in the Manage/Delete pane
+  editDraft: null,            // in-progress add/edit entry (null until the Add pane builds one)
+  present: { list: [], index: 0 }  // presentation session: ordered slides + cursor
 };
 
 var BROWSE_VIEWS = { platform: true, region: true };
@@ -106,6 +108,8 @@ function isBrowseNav(nav){ return !!BROWSE_VIEWS[nav]; }
 var NAV_META = {
   platform: { title: 'By Platform', sub: 'Every update, grouped by marketplace.' },
   region:   { title: 'By Region',   sub: 'Every update, grouped by market — the same grouping used in the email view.' },
+  present:  { title: 'Present', sub: 'Full-screen walkthrough, grouped by date, then region, then platform.' },
+  add:      { title: 'Add entry', sub: 'Add a new update directly, or edit an existing one.' },
   import:   { title: 'Import slides', sub: 'Bring in a PowerPoint deck or a JSON backup.' },
   export:   { title: 'Export slides', sub: 'Download the current view as PDF or JSON.' },
   digest:   { title: 'Regional digests', sub: 'Inline-styled HTML emails, one per region.' },
@@ -1912,10 +1916,456 @@ async function generateExecEmail(){
 function renderWorkspace(){
   var wrap = document.getElementById('workspaceBody');
   if (!wrap) return;
-  if (state.nav === 'import')      renderImportPane(wrap);
+  if (state.nav === 'add')         renderAddPane(wrap);
+  else if (state.nav === 'import') renderImportPane(wrap);
   else if (state.nav === 'export') renderExportPane(wrap);
   else if (state.nav === 'digest') renderDigestPane(wrap);
   else if (state.nav === 'email')  renderEmailPane(wrap);
+}
+
+/* ============================================================
+   ADD / EDIT ENTRY
+   The direct-entry workflow: a form with your six fields. "Details"
+   maps onto the existing body[] model (para / header / bullet / image),
+   so entries created here render, filter, summarise, export to PDF and
+   present exactly like imported ones. Editing loads a slide into the same
+   draft and overwrites it on save.
+   ============================================================ */
+
+// A fresh, empty draft for the Add form.
+function blankDraft(){
+  return {
+    id: null,               // null = new; otherwise editing an existing slide
+    platform: ALLOWED_PLATFORMS[0] || 'Others',
+    region: ALLOWED_REGIONS[0] || '',
+    date: '',
+    date_range: '',
+    title: '',
+    link: '',
+    body: []
+  };
+}
+
+// Turn an existing slide into an editable draft (deep-ish copy of body).
+function draftFromSlide(s){
+  return {
+    id: s.id,
+    platform: s.platform,
+    region: s.region,
+    date: s.date || '',
+    date_range: s.date_range || '',
+    title: s.title || '',
+    link: s.link || '',
+    body: (s.body || []).map(function(b){
+      var c = { type: b.type };
+      if (b.type === 'table'){ c.rows = (b.rows||[]).map(function(r){ return r.slice(); }); }
+      else if (b.type === 'image'){ c.file = b.file || ''; c.dataUrl = b.dataUrl || null; }
+      else { c.text = b.text || ''; }
+      return c;
+    })
+  };
+}
+
+function startNewEntry(){ state.editDraft = blankDraft(); setNav('add'); }
+function startEditEntry(id){
+  var s = slides.find(function(x){ return x.id === id; });
+  if (!s) return;
+  state.editDraft = draftFromSlide(s);
+  setNav('add');
+}
+
+// Build a body-block editor row.
+function detailBlockHtml(b, i){
+  var ctrls =
+    '<div class="detailblock__ctrls">'
+      + '<button type="button" class="detailblock__btn" data-act="up" data-i="'+i+'" title="Move up">&#8593;</button>'
+      + '<button type="button" class="detailblock__btn" data-act="down" data-i="'+i+'" title="Move down">&#8595;</button>'
+      + '<button type="button" class="detailblock__btn detailblock__btn--del" data-act="del" data-i="'+i+'" title="Remove">&#10005;</button>'
+    + '</div>';
+
+  var kindLabel = { para:'Paragraph', header:'Header', bullet:'Bullet', image:'Image', table:'Table' }[b.type] || b.type;
+  var inner;
+  if (b.type === 'image'){
+    inner = '<div class="detailblock__img">'
+      + (b.dataUrl ? '<img src="'+b.dataUrl+'" alt="preview">' : '<div class="detailblock__empty">No image chosen</div>')
+      + '<div class="detailblock__imgmeta">'
+        + '<label class="miniadd" for="detailImg'+i+'">'+(b.dataUrl?'Replace image':'Choose image')+'</label>'
+        + '<input type="file" id="detailImg'+i+'" accept="image/*" data-i="'+i+'" class="detailImgInput">'
+        + (b.file ? '<div style="margin-top:6px;">'+esc(b.file)+'</div>' : '')
+      + '</div>'
+    + '</div>';
+  } else if (b.type === 'table'){
+    // Tables are rare in hand-entry; edit as tab/newline text for simplicity.
+    var asText = (b.rows||[]).map(function(r){ return r.join('\t'); }).join('\n');
+    inner = '<textarea data-i="'+i+'" data-field="table" placeholder="One row per line, cells separated by TAB">'+esc(asText)+'</textarea>';
+  } else {
+    var ph = b.type === 'header' ? 'Section header' : (b.type === 'bullet' ? 'Bullet point' : 'Paragraph text');
+    inner = '<textarea data-i="'+i+'" data-field="text" placeholder="'+ph+'">'+esc(b.text||'')+'</textarea>';
+  }
+
+  return '<div class="detailblock detailblock--'+b.type+'">'
+    + '<div class="detailblock__top"><span class="detailblock__kind">'+esc(kindLabel)+'</span>'+ctrls+'</div>'
+    + inner
+  + '</div>';
+}
+
+function renderAddPane(wrap){
+  if (!state.editDraft) state.editDraft = blankDraft();
+  var d = state.editDraft;
+  var editing = !!d.id;
+
+  var blocksHtml = d.body.length
+    ? d.body.map(detailBlockHtml).join('')
+    : '<div class="detailblock__empty" style="padding:14px;text-align:center;">No details yet — add a paragraph, bullet, header or image below.</div>';
+
+  // Existing entries list (for quick edit/delete without leaving the pane)
+  var listRows = slides.slice().sort(function(a,b){
+    return (b.date||'').localeCompare(a.date||'') || (a.title||'').localeCompare(b.title||'');
+  }).map(function(s){
+    return '<tr>'
+      + '<td class="entrytable__title">'+esc(s.title)+'</td>'
+      + '<td>'+esc(s.platform)+'</td>'
+      + '<td>'+esc(s.region)+'</td>'
+      + '<td>'+esc(s.date ? fmtDate(s.date) : (s.date_range||'—'))+'</td>'
+      + '<td style="white-space:nowrap;">'
+        + '<button type="button" class="entrytable__act" data-edit="'+esc(s.id)+'">Edit</button>'
+        + '<button type="button" class="entrytable__act entrytable__act--del" data-del="'+esc(s.id)+'">Delete</button>'
+      + '</td>'
+    + '</tr>';
+  }).join('');
+
+  wrap.innerHTML =
+    '<div class="panel">'
+      + '<div class="panel__head"><h2 class="panel__title">'+(editing?'Edit entry':'Add a new entry')+'</h2></div>'
+      + '<p class="panel__hint">Fill in the update below. <strong>Details</strong> can mix paragraphs, bullets, section headers and images — the same building blocks used everywhere else in the tool, so this entry will appear in the browse views, presentation, email summaries and PDF export.</p>'
+
+      + '<div class="formgrid">'
+        + '<div class="formfield"><label>Platform</label><select id="fPlatform">'+optionsHtml(ALLOWED_PLATFORMS, d.platform)+'</select></div>'
+        + '<div class="formfield"><label>Region</label><select id="fRegion">'+optionsHtml(ALLOWED_REGIONS, d.region)+'</select></div>'
+        + '<div class="formfield"><label>Period covered — date</label><input type="date" id="fDate" value="'+esc(d.date)+'"><span class="formfield__hint">Drives sorting, filtering and the presentation grouping.</span></div>'
+        + '<div class="formfield"><label>Period covered — label (optional)</label><input type="text" id="fRange" value="'+esc(d.date_range)+'" placeholder="e.g. Jun 29 – Jul 3"><span class="formfield__hint">Display text shown on the entry; free-form.</span></div>'
+        + '<div class="formfield formfield--wide"><label>Title</label><input type="text" id="fTitle" value="'+esc(d.title)+'" placeholder="Headline for this update"></div>'
+        + '<div class="formfield formfield--wide"><label>Link / URL (optional)</label><input type="url" id="fLink" value="'+esc(d.link)+'" placeholder="https://…"></div>'
+      + '</div>'
+
+      + '<div class="detailhead">'
+        + '<span class="detailhead__title">Details</span>'
+        + '<div class="detailhead__actions">'
+          + '<button type="button" class="miniadd" data-add="para">+ Paragraph</button>'
+          + '<button type="button" class="miniadd" data-add="bullet">+ Bullet</button>'
+          + '<button type="button" class="miniadd" data-add="header">+ Header</button>'
+          + '<button type="button" class="miniadd" data-add="image">+ Image</button>'
+          + '<button type="button" class="miniadd" data-add="table">+ Table</button>'
+        + '</div>'
+      + '</div>'
+      + '<div class="detailblocks" id="detailBlocks">'+blocksHtml+'</div>'
+
+      + '<div class="formactions">'
+        + '<button type="button" class="btn" id="saveEntryBtn">'+(editing?'Save changes':'Add entry')+'</button>'
+        + (editing ? '<button type="button" class="btn btn--ghost" id="cancelEditBtn">Cancel edit</button>' : '')
+        + '<div class="formactions__spacer"></div>'
+        + '<button type="button" class="btn btn--ghost" id="clearFormBtn">Clear form</button>'
+      + '</div>'
+    + '</div>'
+
+    + '<div class="panel">'
+      + '<div class="panel__head"><h2 class="panel__title">Existing entries ('+slides.length+')</h2></div>'
+      + '<p class="panel__hint">Edit or remove any entry. Changes are saved to this browser.</p>'
+      + (slides.length
+        ? '<table class="entrytable"><thead><tr><th>Title</th><th>Platform</th><th>Region</th><th>Period</th><th></th></tr></thead><tbody>'+listRows+'</tbody></table>'
+        : '<div class="detailblock__empty">No entries yet.</div>')
+    + '</div>';
+
+  wireAddPane(wrap);
+}
+
+// Read current field values from the DOM into the draft (so a re-render — e.g.
+// after adding a detail block — doesn't lose typed-but-unsaved input).
+function syncDraftFromForm(){
+  var d = state.editDraft; if (!d) return;
+  var g = function(id){ var el = document.getElementById(id); return el ? el.value : ''; };
+  d.platform = g('fPlatform') || d.platform;
+  d.region = g('fRegion') || d.region;
+  d.date = g('fDate');
+  d.date_range = g('fRange');
+  d.title = g('fTitle');
+  d.link = g('fLink');
+  // detail block text
+  document.querySelectorAll('#detailBlocks textarea').forEach(function(ta){
+    var i = parseInt(ta.getAttribute('data-i'), 10);
+    var field = ta.getAttribute('data-field');
+    if (isNaN(i) || !d.body[i]) return;
+    if (field === 'table'){
+      d.body[i].rows = ta.value.split('\n').map(function(line){ return line.split('\t'); });
+    } else {
+      d.body[i].text = ta.value;
+    }
+  });
+}
+
+function wireAddPane(wrap){
+  var d = state.editDraft;
+
+  // simple field bindings (kept live so syncDraftFromForm always has fresh values)
+  ['fPlatform','fRegion','fDate','fRange','fTitle','fLink'].forEach(function(id){
+    var el = document.getElementById(id); if (!el) return;
+    el.addEventListener('input', function(){ syncDraftFromForm(); });
+  });
+
+  // add a detail block
+  wrap.querySelectorAll('[data-add]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      syncDraftFromForm();
+      var kind = btn.getAttribute('data-add');
+      if (kind === 'image') d.body.push({ type:'image', file:'', dataUrl:null });
+      else if (kind === 'table') d.body.push({ type:'table', rows:[['','']] });
+      else d.body.push({ type:kind, text:'' });
+      renderAddPane(wrap);
+    });
+  });
+
+  // move / delete detail blocks
+  wrap.querySelectorAll('.detailblock__btn').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      syncDraftFromForm();
+      var i = parseInt(btn.getAttribute('data-i'), 10);
+      var act = btn.getAttribute('data-act');
+      if (isNaN(i)) return;
+      if (act === 'del') d.body.splice(i, 1);
+      else if (act === 'up' && i > 0){ var t = d.body[i-1]; d.body[i-1] = d.body[i]; d.body[i] = t; }
+      else if (act === 'down' && i < d.body.length-1){ var u = d.body[i+1]; d.body[i+1] = d.body[i]; d.body[i] = u; }
+      renderAddPane(wrap);
+    });
+  });
+
+  // image pickers — read as base64 dataUrl (renderer already supports this)
+  wrap.querySelectorAll('.detailImgInput').forEach(function(input){
+    input.addEventListener('change', function(e){
+      var i = parseInt(input.getAttribute('data-i'), 10);
+      var file = e.target.files[0];
+      if (!file || isNaN(i) || !d.body[i]) return;
+      syncDraftFromForm();
+      var reader = new FileReader();
+      reader.onload = function(){
+        d.body[i].dataUrl = reader.result;
+        d.body[i].file = file.name;
+        renderAddPane(wrap);
+      };
+      reader.readAsDataURL(file);
+    });
+  });
+
+  // save
+  var saveBtn = document.getElementById('saveEntryBtn');
+  if (saveBtn) saveBtn.addEventListener('click', function(){ saveEntry(wrap); });
+
+  var cancelBtn = document.getElementById('cancelEditBtn');
+  if (cancelBtn) cancelBtn.addEventListener('click', function(){ state.editDraft = blankDraft(); renderAddPane(wrap); });
+
+  var clearBtn = document.getElementById('clearFormBtn');
+  if (clearBtn) clearBtn.addEventListener('click', function(){
+    if (window.confirm('Clear the form? Unsaved input will be lost.')){ state.editDraft = blankDraft(); renderAddPane(wrap); }
+  });
+
+  // edit / delete existing entries
+  wrap.querySelectorAll('[data-edit]').forEach(function(btn){
+    btn.addEventListener('click', function(){ startEditEntry(btn.getAttribute('data-edit')); });
+  });
+  wrap.querySelectorAll('[data-del]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var id = btn.getAttribute('data-del');
+      var s = slides.find(function(x){ return x.id === id; });
+      if (!s) return;
+      if (!window.confirm('Delete "'+s.title+'"? This is saved to this browser. Use "Reset to source deck" in Export to restore the original set.')) return;
+      slides = slides.filter(function(x){ return x.id !== id; });
+      state.openCards.delete(id);
+      state.execHtml = null; state.digestHtml = null;
+      if (state.editDraft && state.editDraft.id === id) state.editDraft = blankDraft();
+      saveSlides();
+      renderAddPane(wrap);
+      setStatus('Deleted "'+s.title+'". '+slides.length+' remaining.', true);
+    });
+  });
+}
+
+function saveEntry(wrap){
+  syncDraftFromForm();
+  var d = state.editDraft;
+
+  // validation
+  if (!d.title.trim()){ setStatus('Give the entry a title before saving.', false); return; }
+  if (!d.region){ setStatus('Pick a region.', false); return; }
+  if (d.date && !/^\d{4}-\d{2}-\d{2}$/.test(d.date)){ setStatus('Date must be a valid calendar date.', false); return; }
+
+  // clean up body: drop empty text blocks and empty table rows
+  var body = d.body.map(function(b){
+    if (b.type === 'table'){
+      var rows = (b.rows||[]).map(function(r){ return r.map(function(c){ return String(c).trim(); }); })
+        .filter(function(r){ return r.some(function(c){ return c !== ''; }); });
+      return { type:'table', rows:rows };
+    }
+    if (b.type === 'image') return { type:'image', file:b.file||'', dataUrl:b.dataUrl||null };
+    return { type:b.type, text:String(b.text||'').trim() };
+  }).filter(function(b){
+    if (b.type === 'table') return b.rows.length;
+    if (b.type === 'image') return !!b.dataUrl || !!b.file;
+    return b.text !== '';
+  });
+
+  if (!body.length){ setStatus('Add at least one detail (paragraph, bullet, header, image or table).', false); return; }
+
+  var payload = {
+    platform: normalizePlatform(d.platform),
+    region: d.region,
+    date: d.date || '',
+    date_range: d.date_range.trim(),
+    title: d.title.trim(),
+    link: d.link.trim(),
+    body: body
+  };
+
+  if (d.id){
+    // update in place
+    var idx = slides.findIndex(function(s){ return s.id === d.id; });
+    if (idx !== -1){
+      payload.id = d.id;
+      payload.slide_num = slides[idx].slide_num;
+      slides[idx] = payload;
+    }
+    setStatus('Saved changes to "'+payload.title+'".', true);
+  } else {
+    payload.id = nextId();
+    payload.slide_num = nextSlideNum();
+    slides.push(payload);
+    setStatus('Added "'+payload.title+'". '+slides.length+' entries total.', true);
+  }
+
+  state.execHtml = null; state.digestHtml = null;
+  saveSlides();
+  state.editDraft = blankDraft();     // reset for the next entry
+  renderAddPane(wrap);
+}
+
+/* ============================================================
+   PRESENTATION MODE
+   A full-screen walkthrough. Slides are ordered by date (newest first),
+   then region, then platform — matching how the newsletter reads — and
+   flattened into a linear sequence you step through with the arrow keys
+   or on-screen controls. The breadcrumb shows where you are in the
+   date → region → platform hierarchy.
+   ============================================================ */
+function buildPresentOrder(){
+  var list = filteredSlides().slice();
+  var regionRank = function(r){ var i = ALLOWED_REGIONS.indexOf(r); return i === -1 ? 999 : i; };
+  var platRank = function(p){ var i = ALLOWED_PLATFORMS.indexOf(p); return i === -1 ? 999 : i; };
+  list.sort(function(a,b){
+    // date: newest first; entries without a date sink to the bottom
+    var da = a.date || '', db = b.date || '';
+    if (da !== db){ if (!da) return 1; if (!db) return -1; return db.localeCompare(da); }
+    var rr = regionRank(a.region) - regionRank(b.region);
+    if (rr !== 0) return rr;
+    return platRank(a.platform) - platRank(b.platform);
+  });
+  return list;
+}
+
+function openPresentation(){
+  var list = buildPresentOrder();
+  state.present.list = list;
+  state.present.index = 0;
+  var ov = document.getElementById('presentOverlay');
+  ov.hidden = false;
+  document.body.style.overflow = 'hidden';
+  renderPresent();
+}
+
+function closePresentation(){
+  var ov = document.getElementById('presentOverlay');
+  ov.hidden = true;
+  document.body.style.overflow = '';
+  // return to a browse view so the app surface is visible again
+  if (!isBrowseNav(state.nav)) setNav('platform', { silent:true });
+}
+
+function presentGo(delta){
+  var n = state.present.list.length;
+  if (!n) return;
+  state.present.index = Math.max(0, Math.min(n-1, state.present.index + delta));
+  renderPresent();
+}
+
+function renderPresent(){
+  var stage = document.getElementById('presentStage');
+  var crumbs = document.getElementById('presentCrumbs');
+  var counter = document.getElementById('presentCounter');
+  var progress = document.getElementById('presentProgress');
+  var list = state.present.list;
+
+  if (!list.length){
+    crumbs.innerHTML = '';
+    counter.textContent = '';
+    progress.innerHTML = '';
+    stage.innerHTML = '<div class="present__empty">No updates match the current filters.<br>Adjust the filters or search, then reopen Present.</div>';
+    document.getElementById('presentPrev').disabled = true;
+    document.getElementById('presentNext').disabled = true;
+    return;
+  }
+
+  var i = state.present.index;
+  var s = list[i];
+
+  // breadcrumb: date › region › platform
+  crumbs.innerHTML =
+    '<span class="present__crumb present__crumb--date">'+esc(s.date ? fmtDate(s.date) : (s.date_range || 'Undated'))+'</span>'
+    + '<span class="present__crumbsep">&rsaquo;</span>'
+    + '<span class="present__crumb">'+esc(s.region)+'</span>'
+    + '<span class="present__crumbsep">&rsaquo;</span>'
+    + '<span class="present__crumb">'+esc(s.platform)+'</span>';
+
+  counter.textContent = (i+1) + ' / ' + list.length;
+
+  stage.innerHTML =
+    '<div class="present__card">'
+      + '<div class="present__eyebrow">'
+        + '<span class="present__tag present__tag--platform">'+esc(s.platform)+'</span>'
+        + '<span class="present__tag">'+esc(s.region)+'</span>'
+        + (s.date ? '<span class="present__tag">'+esc(fmtDate(s.date))+'</span>' : (s.date_range ? '<span class="present__tag">'+esc(s.date_range)+'</span>' : ''))
+      + '</div>'
+      + '<h1 class="present__title">'+esc(s.title)+'</h1>'
+      + (s.link ? '<a class="present__link" href="'+esc(s.link)+'" target="_blank" rel="noopener">Open source ↗</a>' : '')
+      + '<div class="present__content">'+renderBody(s.body, false)+'</div>'
+    + '</div>';
+  stage.scrollTop = 0;
+
+  // progress dots — mark where a new date begins
+  progress.innerHTML = list.map(function(item, idx){
+    var newDate = idx === 0 || (list[idx-1].date || '') !== (item.date || '');
+    return '<div class="present__dot'+(idx===i?' is-active':'')+(newDate?' is-newdate':'')+'" data-i="'+idx+'" title="'+esc(item.title)+'"></div>';
+  }).join('');
+  progress.querySelectorAll('.present__dot').forEach(function(dot){
+    dot.addEventListener('click', function(){
+      state.present.index = parseInt(dot.getAttribute('data-i'),10) || 0;
+      renderPresent();
+    });
+  });
+
+  document.getElementById('presentPrev').disabled = (i === 0);
+  document.getElementById('presentNext').disabled = (i === list.length-1);
+}
+
+function initPresentControls(){
+  document.getElementById('presentPrev').addEventListener('click', function(){ presentGo(-1); });
+  document.getElementById('presentNext').addEventListener('click', function(){ presentGo(1); });
+  document.getElementById('presentClose').addEventListener('click', closePresentation);
+  document.addEventListener('keydown', function(e){
+    var ov = document.getElementById('presentOverlay');
+    if (!ov || ov.hidden) return;
+    if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' '){ e.preventDefault(); presentGo(1); }
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp'){ e.preventDefault(); presentGo(-1); }
+    else if (e.key === 'Escape'){ closePresentation(); }
+    else if (e.key === 'Home'){ state.present.index = 0; renderPresent(); }
+    else if (e.key === 'End'){ state.present.index = Math.max(0, state.present.list.length-1); renderPresent(); }
+  });
 }
 
 function renderImportPane(wrap){
@@ -2240,6 +2690,17 @@ function applyNavVisibility(){
 
 function setNav(nav, opts){
   opts = opts || {};
+
+  // "Present" is a modal overlay, not a persistent surface. Launch it over
+  // whatever browse view is active, and don't change the underlying nav so
+  // closing the overlay returns the user where they were.
+  if (nav === 'present'){
+    closeSidebar();
+    if (!isBrowseNav(state.nav)){ state.nav = 'platform'; state.view = 'platform'; applyNavVisibility(); renderFilterRail(); renderMain(); }
+    openPresentation();
+    return;
+  }
+
   state.nav = nav;
   if (isBrowseNav(nav)) state.view = nav;
   closeSidebar();
@@ -2288,6 +2749,7 @@ document.addEventListener('DOMContentLoaded', function(){
   applyUrlParams();
   document.getElementById('searchInput').value = state.search;
   initChrome();
+  initPresentControls();
   setNav(state.nav, { silent:true });
   applyHashDeepLink();
 });
