@@ -226,6 +226,19 @@ button{font-family:inherit;}
 .chip__count{opacity:.6;font-weight:500;margin-left:5px;}
 .chip.is-active .chip__count{opacity:.8;}
 
+.groupby{
+  display:inline-flex;border:1px solid var(--line-strong);border-radius:var(--radius-pill);
+  overflow:hidden;background:#fff;
+}
+.groupby__btn{
+  border:none;background:transparent;cursor:pointer;
+  padding:7px 16px;font-size:12.5px;font-weight:600;color:var(--ink-soft);
+  transition:all .12s ease;
+}
+.groupby__btn + .groupby__btn{border-left:1px solid var(--line-strong);}
+.groupby__btn:hover{color:var(--accent);}
+.groupby__btn.is-active{background:var(--accent);color:#fff;}
+
 .daterange{display:flex;align-items:center;gap:8px;}
 .daterange input[type="date"]{
   border:1px solid var(--line-strong);
@@ -801,13 +814,6 @@ input[type="file"]{display:none;}
 .present__content .card__imgnote{
   background:rgba(255,255,255,.06);border-radius:8px;padding:12px;color:#9fb4d6;font-size:.85em;
 }
-/* pasted tables (inside .rich) on the dark presentation background */
-.present__content .rich table{background:rgba(255,255,255,.04);border-radius:8px;overflow:hidden;}
-.present__content .rich table td,.present__content .rich table th{
-  border:1px solid rgba(255,255,255,.12);color:#dbe6f6;
-}
-.present__content .rich table th{background:rgba(255,255,255,.09);color:#fff;font-weight:600;}
-.present__content .rich table tr:first-child td{background:rgba(255,255,255,.09);color:#fff;font-weight:600;}
 .present__progress{
   display:flex;gap:4px;padding:14px 26px 20px;flex:none;overflow-x:auto;
 }
@@ -872,24 +878,23 @@ input[type="file"]{display:none;}
    pushing the table past the edge of the screen. */
 .rtb__editor table,
 .rich table{
-  width:100%;
-  max-width:100%;
-  table-layout:fixed;
-  border-collapse:collapse;
-  margin:10px 0;
-  font-size:.92em;
+  width:100%;max-width:100%;table-layout:fixed;border-collapse:collapse;
+  margin:10px 0;font-size:.92em;
 }
 .rtb__editor table td,.rtb__editor table th,
 .rich table td,.rich table th{
-  border:1px solid var(--line);
-  padding:6px 9px;
-  text-align:left;
-  vertical-align:top;
-  overflow-wrap:anywhere;
-  word-break:break-word;
+  border:1px solid var(--line);padding:6px 9px;text-align:left;
+  vertical-align:top;overflow-wrap:anywhere;word-break:break-word;
 }
-/* editor surface: give the whole editable area a horizontal safety net too */
 .rtb__editor{overflow-x:auto;}
+
+/* pasted tables (inside .rich) on the dark presentation background */
+.present__content .rich table{background:rgba(255,255,255,.04);border-radius:8px;overflow:hidden;}
+.present__content .rich table td,.present__content .rich table th{
+  border:1px solid rgba(255,255,255,.12);color:#dbe6f6;
+}
+.present__content .rich table th{background:rgba(255,255,255,.09);color:#fff;font-weight:600;}
+.present__content .rich table tr:first-child td{background:rgba(255,255,255,.09);color:#fff;font-weight:600;}
 
 /* ============================================================
    ARCHIVE

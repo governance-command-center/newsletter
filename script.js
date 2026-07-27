@@ -202,10 +202,10 @@ function initSlides(){
    ============================================================ */
 var state = {
   // nav: which left-sidebar item is active.
-  //   browse views: 'platform' | 'region'
+  //   browse view:  'browse'  (single tab; grouping controlled by state.view)
   //   admin panes:  'import' | 'export' | 'digest' | 'email'
-  nav: 'platform',
-  view: 'platform',            // mirrors nav for the two browse views (kept for grouping logic)
+  nav: 'browse',
+  view: 'platform',            // grouping mode for the Browse tab: 'platform' | 'region'
   search: '',
   platforms: new Set(),        // empty set = "all"
   regions: new Set(),          // empty set = "all"
@@ -224,12 +224,11 @@ var state = {
   present: { list: [], index: 0 }  // presentation session: ordered slides + cursor
 };
 
-var BROWSE_VIEWS = { platform: true, region: true };
+var BROWSE_VIEWS = { browse: true };
 function isBrowseNav(nav){ return !!BROWSE_VIEWS[nav]; }
 
 var NAV_META = {
-  platform: { title: 'By Platform', sub: 'Every update, grouped by marketplace.' },
-  region:   { title: 'By Region',   sub: 'Every update, grouped by market — the same grouping used in the email view.' },
+  browse:   { title: 'Browse updates', sub: 'Every update in one place — group by platform or region, filter, and search.' },
   present:  { title: 'Present', sub: 'Full-screen walkthrough, grouped by date, then region, then platform.' },
   add:      { title: 'Add entry', sub: 'Add a new update directly, or edit an existing one.' },
   import:   { title: 'Import slides', sub: 'Bring in a PowerPoint deck or a JSON backup.' },
@@ -435,6 +434,13 @@ function renderFilterRail(){
 
   rail.innerHTML =
     '<div class="filtergroup">'
+      + '<span class="filtergroup__label">Group by</span>'
+      + '<div class="groupby" role="group" aria-label="Group updates by">'
+        + '<button type="button" class="groupby__btn'+(state.view==='platform'?' is-active':'')+'" data-group="platform">Platform</button>'
+        + '<button type="button" class="groupby__btn'+(state.view==='region'?' is-active':'')+'" data-group="region">Region</button>'
+      + '</div>'
+    + '</div>'
+    + '<div class="filtergroup">'
       + '<span class="filtergroup__label">Platform</span>'
       + chipsHtml('platform', ALLOWED_PLATFORMS, state.platforms)
     + '</div>'
@@ -451,6 +457,13 @@ function renderFilterRail(){
       + '</div>'
       + (hasActiveFilters ? '<button type="button" class="filters__clear" id="clearFilters">Clear all filters</button>' : '')
     + '</div>';
+
+  rail.querySelectorAll('.groupby__btn').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var g = btn.getAttribute('data-group');
+      if (g === 'platform' || g === 'region'){ state.view = g; renderAll(); }
+    });
+  });
 
   rail.querySelectorAll('.chip').forEach(function(chip){
     chip.addEventListener('click', function(){
@@ -561,7 +574,6 @@ function sanitizeRichHtml(html){
           var cleaned = cleanInlineStyle(attr.value);
           if (cleaned) child.setAttribute('style', cleaned); else child.removeAttribute('style');
         } else if ((name === 'colspan' || name === 'rowspan') && (tag === 'TD' || tag === 'TH')){
-          // keep simple numeric spans on pasted table cells
           if (!/^\d+$/.test(attr.value.trim())) child.removeAttribute(attr.name);
         } else {
           child.removeAttribute(attr.name);
@@ -579,17 +591,15 @@ function sanitizeRichHtml(html){
 }
 
 // Detect black / near-black colours that pasted content (Word, Google Docs,
-// web pages) commonly injects as an explicit color. We drop these so the text
-// inherits the theme colour instead — dark ink on the browse views, light on
-// the dark presentation background — keeping everything "in line" with the
-// surrounding text. Deliberately chosen colours (blue, red, etc.) are kept.
+// web pages) commonly injects. We drop these so text inherits the theme colour
+// — dark ink on browse, light on the dark presentation background. Deliberate
+// colours (blue, red, etc.) are kept.
 function isDefaultBlack(val){
   var v = String(val).trim().toLowerCase().replace(/\s+/g,'');
   if (v === 'black' || v === '#000' || v === '#000000') return true;
   var m = v.match(/^rgba?\((\d+),(\d+),(\d+)(?:,([\d.]+))?\)$/);
   if (m){
     var r = +m[1], g = +m[2], b = +m[3];
-    // treat very dark greys as "black" too (Word often uses rgb(0,0,0)..(51,51,51))
     if (r <= 51 && g <= 51 && b <= 51) return true;
   }
   var hx = v.match(/^#([0-9a-f]{6})$/);
@@ -609,8 +619,7 @@ function cleanInlineStyle(style){
     var val = decl.slice(idx+1).trim();
     if (!RICH_ALLOWED_STYLES[prop]) return;
     if (/url\s*\(|expression|javascript:/i.test(val)) return; // no image/script tricks
-    // drop default black text colour so it inherits the theme colour
-    if (prop === 'color' && isDefaultBlack(val)) return;
+    if (prop === 'color' && isDefaultBlack(val)) return; // inherit theme colour
     out.push(prop + ':' + val);
   });
   return out.join(';');
@@ -1375,6 +1384,29 @@ function exportJson(listArg, labelArg){
   setStatus('Exported '+list.length+' slide'+(list.length===1?'':'s')+' as JSON. Use this file to re-import into this tool.', true);
 }
 
+// Export the current scope as a standalone .html file using the SAME styled
+// layout as Generate email — reporting period, summary, per-platform counts, and
+// every update (ordered by urgency) with its platform badge and source link.
+// This is the "include the source" export: each entry's source URL is rendered
+// exactly as it is in the email ("Read more →"), so the file is a self-contained,
+// forwardable copy of the briefing.
+function exportEmailHtml(listArg, labelArg){
+  var scope = currentExportScope();
+  var list = listArg || (scope === 'filtered' ? filteredSlides() : slides);
+  if (!list.length){ setStatus('Nothing to export — the current selection has no slides.', false); return; }
+
+  var baseUrl = state.emailBaseUrl || '';
+  var criticalList = pickCriticalUpdates(list);           // all, ranked by urgency
+  var periodLabel = reportingPeriodLabel(list);
+
+  var html = buildExecEmailHtml(list, criticalList, { periodLabel: periodLabel, baseUrl: baseUrl, thumbs: {} });
+
+  var stamp = new Date().toISOString().slice(0,10);
+  var slug = (labelArg ? labelArg.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'') : scope) || 'export';
+  download('newsletter-email-'+slug+'-'+stamp+'.html', html, 'text/html');
+  setStatus('Exported '+list.length+' update'+(list.length===1?'':'s')+' as a styled email (.html), source links included. Open it to read, forward it, or select-all and paste into Gmail/Outlook.', true);
+}
+
 function buildPrintDoc(list, titleLabel){
   var g = groupAndOrder(list);
   var scopeLabel = titleLabel || (currentExportScope() === 'all' ? 'All updates' : 'Filtered view');
@@ -1718,6 +1750,19 @@ var PLATFORM_BADGE_COLOR = {
   Others: '#6b7684'    // grey
 };
 
+// Short per-platform codes shown inside the badge square (email + on-screen
+// cards). Keeps the marketplace recognisable without a scraped/trademarked logo.
+var PLATFORM_BADGE_CODE = {
+  Lazada: 'LZD',
+  Shopee: 'SHP',
+  Tiktok: 'TTS',
+  Zalora: 'ZLR',
+  Others: 'OTH'
+};
+function platformCode(platform){
+  return PLATFORM_BADGE_CODE[platform] || (platform || '?').slice(0,3).toUpperCase();
+}
+
 function firstSlideImage(s){
   return s.body.find(function(b){ return b.type === 'image' && b.dataUrl; }) || null;
 }
@@ -1761,8 +1806,9 @@ function makeThumbnailDataUrl(dataUrl, maxSize){
 function platformBadge(platform, size){
   size = size || 48;
   var bg = PLATFORM_BADGE_COLOR[platform] || '#1b2a4a';
-  var initial = (platform || '?').charAt(0).toUpperCase();
-  var fontPx = Math.round(size * 0.46);
+  var code = platformCode(platform);          // 3-letter code, e.g. LZD / SHP / TTS / ZLR
+  // 3 characters need a smaller font than a single initial so they fit the square.
+  var fontPx = Math.round(size * 0.27);
   var radius = Math.round(size * 0.22);          // ~22% — a soft square, not a pill
   var arc = (radius / size).toFixed(2);          // VML wants the radius as a ratio
 
@@ -1773,8 +1819,8 @@ function platformBadge(platform, size){
         + 'style="width:' + size + 'px;height:' + size + 'px;v-text-anchor:middle;" '
         + 'arcsize="' + Math.round(arc * 100) + '%" stroke="f" fillcolor="' + bg + '">'
         + '<w:anchorlock/>'
-        + '<center style="color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:' + fontPx + 'px;font-weight:bold;">'
-          + esc(initial)
+        + '<center style="color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:' + fontPx + 'px;font-weight:bold;letter-spacing:.5px;">'
+          + esc(code)
         + '</center>'
       + '</v:roundrect>'
     + '<![endif]-->'
@@ -1790,9 +1836,9 @@ function platformBadge(platform, size){
             + 'style="background-color:' + bg + ';width:' + size + 'px;height:' + size + 'px;'
             + 'border-radius:' + radius + 'px;text-align:center;vertical-align:middle;'
             + 'color:#ffffff;font-family:Arial,Helvetica,sans-serif;'
-            + 'font-size:' + fontPx + 'px;font-weight:bold;line-height:1;'
+            + 'font-size:' + fontPx + 'px;font-weight:bold;line-height:1;letter-spacing:.5px;'
             + 'mso-line-height-rule:exactly;">'
-            + esc(initial)
+            + esc(code)
           + '</td>'
         + '</tr>'
       + '</table>'
@@ -1855,38 +1901,11 @@ function buildExecEmailHtml(list, criticalList, opts){
           + '<font color="' + accent + '" style="color:' + accent + ';">Read more &#8594;</font></a>'
       : '';
 
-    // Thumbnail if the slide has a picture, else the platform square. Both are
-    // table-based with bgcolor so Word/Outlook can't drop the fill.
-    //
-    // The thumbnail links to the VENDOR'S page — the same destination as "Read
-    // more". Email clients strip <script>, so a click-to-zoom lightbox is
-    // impossible; a link out is the only thing that can work. This used to link
-    // to the interactive tool via toolLink(baseUrl, s), which meant the image was
-    // a dead, unclickable <img> whenever the Base URL field was left empty (the
-    // usual case). s.link is always present, so this always works.
-    var thumb = thumbs[s.id];
-    var imgCell;
-    if (thumb) {
-      // 64px, not 48. The slides are dense screenshots; at 48px they were an
-      // unreadable smudge. This is still only a cue — the click is what gets you
-      // the readable version.
-      var imgTag = '<img src="' + thumb + '" width="64" height="64" '
-        + 'style="width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid #dfe3e8;display:block;" '
-        + 'alt="' + esc(s.title) + '">';
-      imgCell = s.link
-        ? '<a href="' + esc(s.link) + '" title="Open the full update on ' + esc(s.platform) + '" style="text-decoration:none;border:0;">'
-            + imgTag
-            // Affordance. A bare image gives no hint that it's clickable, so we
-            // label it. Uses the platform accent to tie it to the row.
-            + '<div style="text-align:center;font-family:Arial,Helvetica,sans-serif;font-size:9.5px;'
-              + 'font-weight:bold;color:' + accent + ';margin-top:4px;letter-spacing:.03em;">'
-              + '<font color="' + accent + '" style="color:' + accent + ';">&#8599; Open</font>'
-            + '</div>'
-          + '</a>'
-        : imgTag;
-    } else {
-      imgCell = platformBadge(s.platform, 48);
-    }
+    // Every row uses the lettered, platform-coloured badge — no image thumbnails.
+    // Screenshots read as an unreadable smudge at this size, and inline images
+    // bloat the email (Gmail clipping, Outlook weight); the coloured 3-letter
+    // code (LZD / SHP / TTS / ZLR) identifies the marketplace at a glance.
+    var imgCell = platformBadge(s.platform, 48);
 
     // The row is a 4-column table: accent stripe | rank | badge | content.
     // The stripe is a 4px bgcolor <td> in the platform's brand colour — it gives
@@ -2109,26 +2128,14 @@ async function generateExecEmail(){
   // Feature every update in scope, ordered by criticality (most urgent first).
   var criticalList = pickCriticalUpdates(list);
 
-  var baseUrlEl = document.getElementById('emailBaseUrl');
-  var baseUrl = baseUrlEl ? baseUrlEl.value.trim() : '';
+  // The Base URL field (id emailBaseUrlExec) syncs to state.emailBaseUrl on input.
+  var baseUrl = state.emailBaseUrl || '';
   var periodLabel = reportingPeriodLabel(list);
 
-  var withImages = criticalList.filter(firstSlideImage);
-  var thumbs = {};
-  if (withImages.length){
-    setStatus('Shrinking ' + withImages.length + ' image' + (withImages.length === 1 ? '' : 's') + ' for the email…', true);
-    for (var i = 0; i < withImages.length; i++){
-      var s = withImages[i];
-      var img = firstSlideImage(s);
-      var thumbUrl = await makeThumbnailDataUrl(img.dataUrl, 130);
-      if (thumbUrl) thumbs[s.id] = thumbUrl;
-    }
-  }
-
-  state.execHtml = buildExecEmailHtml(list, criticalList, { periodLabel: periodLabel, baseUrl: baseUrl, thumbs: thumbs });
+  // Badges are lettered platform codes, so no image processing is needed.
+  state.execHtml = buildExecEmailHtml(list, criticalList, { periodLabel: periodLabel, baseUrl: baseUrl, thumbs: {} });
   renderExecPreview();
-  var withImageCount = Object.keys(thumbs).length;
-  setStatus('Generated the executive email — all ' + list.length + ' update' + (list.length === 1 ? '' : 's') + ' included, ordered by urgency' + (withImageCount ? ' (' + withImageCount + ' with a thumbnail, the rest with a platform badge)' : '') + '.', true);
+  setStatus('Generated the executive email — all ' + list.length + ' update' + (list.length === 1 ? '' : 's') + ' included, ordered by urgency, each with its platform badge (' + platformCode('Lazada') + ', ' + platformCode('Shopee') + ', ' + platformCode('Tiktok') + ', ' + platformCode('Zalora') + ').', true);
 }
 
 /* ============================================================
@@ -2687,7 +2694,7 @@ function closePresentation(){
   ov.hidden = true;
   document.body.style.overflow = '';
   // return to a browse view so the app surface is visible again
-  if (!isBrowseNav(state.nav)) setNav('platform', { silent:true });
+  if (!isBrowseNav(state.nav)) setNav('browse', { silent:true });
 }
 
 function presentGo(delta){
@@ -2987,13 +2994,14 @@ function renderExportPane(wrap){
   wrap.innerHTML =
     '<div class="panel">'
       + '<div class="panel__head"><h2 class="panel__title">Export slides</h2></div>'
-      + '<p class="panel__hint">Exports respect the Platform / Region / Date / Search filters set on the browse views.</p>'
+      + '<p class="panel__hint">Exports respect the Platform / Region / Date / Search filters set on the browse view. <strong>Export as Email</strong> produces the same styled briefing as the Generate email tab — reporting period, summary, per-platform counts, and every update with its platform badge and source link — as a self-contained <code>.html</code> file you can open, forward, or paste into your inbox.</p>'
       + '<div class="scopepick">'
         + '<label><input type="radio" name="exportScope" value="filtered" checked> Current filtered view ('+filteredSlides().length+')</label>'
         + '<label><input type="radio" name="exportScope" value="all"> All slides ('+slides.length+')</label>'
       + '</div>'
       + '<div class="adminpanel__row">'
-        + '<button type="button" class="btn" id="exportPdfBtn">Export as PDF</button>'
+        + '<button type="button" class="btn" id="exportEmailBtn">Export as Email (HTML)</button>'
+        + '<button type="button" class="btn btn--ghost" id="exportPdfBtn">Export as PDF</button>'
         + '<button type="button" class="btn btn--ghost" id="exportJsonBtn">Export as JSON (for re-import)</button>'
       + '</div>'
     + '</div>'
@@ -3036,6 +3044,7 @@ function renderExportPane(wrap){
       + '</div>'
     + '</div>';
 
+  document.getElementById('exportEmailBtn').addEventListener('click', function(){ exportEmailHtml(); });
   document.getElementById('exportPdfBtn').addEventListener('click', function(){ exportPdf(); });
   document.getElementById('exportJsonBtn').addEventListener('click', function(){ exportJson(); });
 
@@ -3124,7 +3133,7 @@ function renderEmailPane(wrap){
   wrap.innerHTML =
     '<div class="panel">'
       + '<div class="panel__head"><h2 class="panel__title">Generate email</h2></div>'
-      + '<p class="panel__hint">A short, leadership-facing briefing: reporting period, an auto-generated summary, per-platform counts and the top updates that need attention — each with a small inline thumbnail (shrunk in-browser so the email stays light) or a platform-coloured badge when a slide has no picture. Set a base URL to make the thumbnails and the "Open Interactive Newsletter" button clickable. When you hit <strong>Copy for email</strong>, the styled briefing — links live, images inline — is placed on your clipboard so it pastes into Gmail or Outlook exactly as previewed.</p>'
+      + '<p class="panel__hint">A short, leadership-facing briefing: reporting period, an auto-generated summary, per-platform counts and the top updates that need attention — each tagged with its platform-coloured badge (LZD in blue, SHP in orange, TTS in black, ZLR in purple). Set a base URL to make the "Open Interactive Newsletter" button clickable. When you hit <strong>Copy for email</strong>, the styled briefing — links live — is placed on your clipboard so it pastes into Gmail or Outlook exactly as previewed.</p>'
       + '<div class="scopepick">'
         + '<label><input type="radio" name="execScope" value="filtered" checked> Current filtered view ('+filteredSlides().length+')</label>'
         + '<label><input type="radio" name="execScope" value="all"> All slides ('+slides.length+')</label>'
@@ -3159,7 +3168,8 @@ function applyUrlParams(){
   if (platform) platform.split(',').forEach(function(p){ var n = normalizePlatformStrict(p.trim()); if (n) state.platforms.add(n); });
   if (from) state.dateFrom = from;
   if (to) state.dateTo = to;
-  if (view === 'region' || view === 'platform'){ state.view = view; state.nav = view; }
+  // `view` now controls grouping within the single Browse tab (not the nav item)
+  if (view === 'region' || view === 'platform'){ state.view = view; state.nav = 'browse'; }
   if (q) state.search = q;
 }
 
@@ -3169,8 +3179,8 @@ function applyHashDeepLink(){
   var id = decodeURIComponent(m[1]);
   if (!slides.some(function(s){ return s.id === id; })) return;
   state.openCards.add(id);
-  // deep links always land on a browse view
-  if (!isBrowseNav(state.nav)) setNav('platform', { silent:true });
+  // deep links always land on the browse view
+  if (!isBrowseNav(state.nav)) setNav('browse', { silent:true });
   renderMain();
   setTimeout(function(){
     var el = document.querySelector('.card[data-id="'+id.replace(/"/g,'')+'"]');
@@ -3190,7 +3200,7 @@ function applyNavVisibility(){
   document.getElementById('searchWrap').classList.toggle('is-hidden', !browse);
   document.getElementById('workspace').hidden = browse;
 
-  var meta = NAV_META[state.nav] || NAV_META.platform;
+  var meta = NAV_META[state.nav] || NAV_META.browse;
   document.getElementById('pageTitle').textContent = meta.title;
   document.getElementById('pageSub').textContent = meta.sub;
 
@@ -3207,13 +3217,12 @@ function setNav(nav, opts){
   // closing the overlay returns the user where they were.
   if (nav === 'present'){
     closeSidebar();
-    if (!isBrowseNav(state.nav)){ state.nav = 'platform'; state.view = 'platform'; applyNavVisibility(); renderFilterRail(); renderMain(); }
+    if (!isBrowseNav(state.nav)){ state.nav = 'browse'; applyNavVisibility(); renderFilterRail(); renderMain(); }
     openPresentation();
     return;
   }
 
   state.nav = nav;
-  if (isBrowseNav(nav)) state.view = nav;
   closeSidebar();
   applyNavVisibility();
   if (isBrowseNav(nav)){
