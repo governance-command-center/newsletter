@@ -1823,7 +1823,10 @@ function platformBadge(platform, size){
   var bg = PLATFORM_BADGE_COLOR[platform] || '#1b2a4a';
   var code = platformCode(platform);          // 3-letter code, e.g. LZD / SHP / TTS / ZLR
   // 3 characters need a smaller font than a single initial so they fit the square.
-  var fontPx = Math.round(size * 0.27);
+  // Outlook's VML box is unforgiving: at 0.27 the three bold letters overflow the
+  // 48px width and wrap to two lines ("LZ / D"). 0.23 with no letter-spacing keeps
+  // all three on one line in Word/Outlook while staying legible.
+  var fontPx = Math.round(size * 0.23);
   var radius = Math.round(size * 0.22);          // ~22% — a soft square, not a pill
   var arc = (radius / size).toFixed(2);          // VML wants the radius as a ratio
 
@@ -1831,10 +1834,10 @@ function platformBadge(platform, size){
     // ---- Outlook only: VML rounded rectangle ----
     + '<!--[if mso]>'
       + '<v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" '
-        + 'style="width:' + size + 'px;height:' + size + 'px;v-text-anchor:middle;" '
+        + 'style="width:' + size + 'px;height:' + size + 'px;v-text-anchor:middle;mso-fit-shape-to-text:f;" '
         + 'arcsize="' + Math.round(arc * 100) + '%" stroke="f" fillcolor="' + bg + '">'
         + '<w:anchorlock/>'
-        + '<center style="color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:' + fontPx + 'px;font-weight:bold;letter-spacing:.5px;">'
+        + '<center style="color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:' + fontPx + 'px;font-weight:bold;mso-line-height-rule:exactly;line-height:' + size + 'px;white-space:nowrap;">'
           + esc(code)
         + '</center>'
       + '</v:roundrect>'
@@ -1851,9 +1854,9 @@ function platformBadge(platform, size){
             + 'style="background-color:' + bg + ';width:' + size + 'px;height:' + size + 'px;'
             + 'border-radius:' + radius + 'px;text-align:center;vertical-align:middle;'
             + 'color:#ffffff;font-family:Arial,Helvetica,sans-serif;'
-            + 'font-size:' + fontPx + 'px;font-weight:bold;line-height:1;letter-spacing:.5px;'
+            + 'font-size:' + fontPx + 'px;font-weight:bold;line-height:1;white-space:nowrap;'
             + 'mso-line-height-rule:exactly;">'
-            + '<font color="#ffffff" style="color:#ffffff;">' + esc(code) + '</font>'
+            + '<font color="#ffffff" style="color:#ffffff;white-space:nowrap;">' + esc(code) + '</font>'
           + '</td>'
         + '</tr>'
       + '</table>'
@@ -2102,8 +2105,6 @@ function renderExecPreview(){
       + '<div class="emailpreview__bar">'
         + '<span class="emailpreview__label">Email preview</span>'
         + '<button type="button" class="btn copybtn" id="execCopyBtn"><span class="copybtn__toast">Copied — paste into your email</span>Copy for email</button>'
-        + '<button type="button" class="btn btn--ghost" id="execCopyHtmlBtn">Copy HTML source</button>'
-        + '<button type="button" class="btn btn--ghost" id="execDownloadBtn">Download .html</button>'
       + '</div>'
       + '<iframe id="execPreviewFrame" title="Executive email preview"></iframe>'
     + '</div>';
@@ -2116,20 +2117,8 @@ function renderExecPreview(){
       flashToast(btn);
       setStatus('Copied. Paste (Ctrl/Cmd+V) into a new Gmail, Outlook or Apple Mail message — the layout, links and images come across exactly as shown.', true);
     }, function(){
-      setStatus('Couldn\'t copy the styled version automatically. Use "Download .html", open the file, then select-all and copy into your email.', false);
+      setStatus('Couldn\'t copy the styled version automatically. Try again, or use a different browser.', false);
     });
-  });
-  document.getElementById('execCopyHtmlBtn').addEventListener('click', function(){
-    navigator.clipboard.writeText(state.execHtml).then(function(){
-      setStatus('Copied the raw HTML source — useful for pasting into an email template or a CMS "source" view.', true);
-    }).catch(function(){
-      setStatus('Could not copy the source automatically — use the Download button instead.', false);
-    });
-  });
-  document.getElementById('execDownloadBtn').addEventListener('click', function(){
-    var stamp = new Date().toISOString().slice(0,10);
-    download('executive-email-' + stamp + '.html', state.execHtml, 'text/html');
-    setStatus('Downloaded the email as HTML. Open it and copy its contents into your email client, or forward it as an HTML attachment.', true);
   });
 }
 
@@ -2373,7 +2362,7 @@ function renderAddPane(wrap){
             + '<div class="formactions__spacer"></div>'
             + '<button type="button" class="btn" id="archiveSelectedBtn" disabled>Archive selected</button>'
           + '</div>'
-          + '<table class="entrytable"><thead><tr><th class="entrytable__check"></th><th>Title</th><th>Platform</th><th>Region</th><th>Period</th><th></th></tr></thead><tbody>'+listRows+'</tbody></table>'
+          + '<table class="entrytable"><thead><tr><th class="entrytable__check"></th><th>Title</th><th>Platform</th><th>Region</th><th>Publish date</th><th></th></tr></thead><tbody>'+listRows+'</tbody></table>'
         : '<div class="detailblock__empty">No entries yet.</div>')
     + '</div>';
 
@@ -2954,7 +2943,7 @@ function renderArchivePane(wrap){
         + '<button type="button" class="btn btnsm" data-arch-restore="'+esc(b.id)+'" disabled>Restore selected</button>'
         + '<button type="button" class="btn btn--ghost btnsm" data-arch-restoreall="'+esc(b.id)+'">Restore all</button>'
       + '</div>'
-      + '<table class="entrytable"><thead><tr><th class="entrytable__check"></th><th>Title</th><th>Platform</th><th>Region</th><th>Period</th></tr></thead><tbody>'+rows+'</tbody></table>'
+      + '<table class="entrytable"><thead><tr><th class="entrytable__check"></th><th>Title</th><th>Platform</th><th>Region</th><th>Publish date</th></tr></thead><tbody>'+rows+'</tbody></table>'
     + '</div>';
   }).join('');
 
