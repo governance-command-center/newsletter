@@ -146,14 +146,39 @@ var AUTH = (function(){
   function isAdmin(){ return session && session.role==='admin'; }
 
   /* ---- account management ---- */
-  function createUser(username, pw, role){
+  function createUser(username, pw, role, details){
     username = String(username||'').trim().toLowerCase();
+    details = details || {};
     if (!username) return Promise.reject(new Error('Username required.'));
     if (!/^[a-z0-9._-]{2,32}$/.test(username)) return Promise.reject(new Error('Username: 2-32 chars, letters/numbers/._- only.'));
     if (!pw || pw.length<4) return Promise.reject(new Error('Password must be at least 4 characters.'));
+    var email = String(details.email||'').trim();
+    if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return Promise.reject(new Error('Enter a valid email address, or leave it blank.'));
     return pull().then(function(r){
       if (r.users[username]) throw new Error('That username already exists.');
-      r.users[username] = { role: role==='admin'?'admin':'member', pw:hashPw(pw), createdAt:Date.now(), createdBy: session?session.username:'unknown' };
+      r.users[username] = {
+        role: role==='admin'?'admin':'member',
+        pw:hashPw(pw),
+        displayName: String(details.displayName||'').trim(),
+        email: email,
+        createdAt:Date.now(),
+        createdBy: session?session.username:'unknown'
+      };
+      return push(r).then(function(){ return username; });
+    });
+  }
+  // Admin-only: edit a member's profile details (display name / email).
+  function updateUser(username, details){
+    username = String(username||'').trim().toLowerCase();
+    details = details || {};
+    var email = String(details.email||'').trim();
+    if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return Promise.reject(new Error('Enter a valid email address, or leave it blank.'));
+    return pull().then(function(r){
+      if (!r.users[username]) throw new Error('No such user.');
+      if (details.displayName !== undefined) r.users[username].displayName = String(details.displayName||'').trim();
+      if (details.email !== undefined) r.users[username].email = email;
+      r.users[username].updatedAt = Date.now();
+      r.users[username].updatedBy = session?session.username:'unknown';
       return push(r).then(function(){ return username; });
     });
   }
@@ -191,7 +216,7 @@ var AUTH = (function(){
     if (!remote) return [];
     return Object.keys(remote.users).sort().map(function(name){
       var u=remote.users[name];
-      return { username:name, role:u.role, createdAt:u.createdAt||null, createdBy:u.createdBy||null, pwResetAt:u.pwResetAt||null, pwResetBy:u.pwResetBy||null };
+      return { username:name, role:u.role, displayName:u.displayName||'', email:u.email||'', createdAt:u.createdAt||null, createdBy:u.createdBy||null, pwResetAt:u.pwResetAt||null, pwResetBy:u.pwResetBy||null, updatedAt:u.updatedAt||null, updatedBy:u.updatedBy||null };
     });
   }
 
@@ -211,7 +236,7 @@ var AUTH = (function(){
     loadSession:loadSession, getSession:function(){ return session; },
     login:login, logout:logout, isAdmin:isAdmin,
     pull:pull, bootstrap:bootstrap, blankRemote:blankRemote,
-    createUser:createUser, resetPassword:resetPassword, deleteUser:deleteUser, setRole:setRole, listUsers:listUsers,
+    createUser:createUser, updateUser:updateUser, resetPassword:resetPassword, deleteUser:deleteUser, setRole:setRole, listUsers:listUsers,
     pullData:pullData, pushData:pushData, getRemote:function(){ return remote; }
   };
 })();
@@ -2438,10 +2463,55 @@ function blankDraft(){
   };
 }
 
-// Turn an existing slide into an editable draft. Legacy text blocks
-// (para/header/bullet, from the seed deck or PPTX import) are converted to the
-// unified "rich" block so they load into the rich editor; image/table are kept.
+// Turn an existing slide into an editable draft. All consecutive text blocks
+// (rich/para/header/bullet, from the seed deck or PPTX import) are merged into a
+// SINGLE unified "rich" block so they load into one Details editor with one
+// toolbar. Image/table blocks are kept as their own separate blocks, in order.
 function draftFromSlide(s){
+  // Convert one legacy/text block to an HTML fragment.
+  function blockToHtml(b){
+    if (b.type === 'rich') return b.html || '';
+    var t = esc(b.text || '');
+    if (b.type === 'header') return '<h4>'+t+'</h4>';
+    if (b.type === 'bullet') return '<li>'+t+'</li>'; // wrapped into <ul> by the merger
+    return '<p>'+t+'</p>';
+  }
+  var isText = function(b){ return b.type==='rich' || b.type==='header' || b.type==='bullet' || b.type==='para'; };
+
+  var body = [];
+  var buffer = [];   // pending text blocks to merge
+  var bulletRun = []; // pending consecutive bullets
+
+  function flushBullets(){
+    if (!bulletRun.length) return;
+    buffer.push('<ul>'+bulletRun.join('')+'</ul>');
+    bulletRun = [];
+  }
+  function flushText(){
+    flushBullets();
+    if (!buffer.length) return;
+    body.push({ type:'rich', html: buffer.join('') });
+    buffer = [];
+  }
+
+  (s.body || []).forEach(function(b){
+    if (b.type === 'image'){
+      flushText();
+      body.push({ type:'image', file:b.file||'', dataUrl:b.dataUrl||null });
+    } else if (b.type === 'table'){
+      flushText();
+      body.push({ type:'table', rows:(b.rows||[]).map(function(r){ return r.slice(); }) });
+    } else if (isText(b)){
+      if (b.type === 'bullet'){
+        bulletRun.push(blockToHtml(b)); // accumulate into one list
+      } else {
+        flushBullets();
+        buffer.push(blockToHtml(b));
+      }
+    }
+  });
+  flushText();
+
   return {
     id: s.id,
     platform: s.platform,
@@ -2450,17 +2520,7 @@ function draftFromSlide(s){
     date_range: s.date_range || '',
     title: s.title || '',
     link: s.link || '',
-    body: (s.body || []).map(function(b){
-      if (b.type === 'table') return { type:'table', rows:(b.rows||[]).map(function(r){ return r.slice(); }) };
-      if (b.type === 'image') return { type:'image', file:b.file||'', dataUrl:b.dataUrl||null };
-      if (b.type === 'rich')  return { type:'rich', html:b.html||'' };
-      // legacy plain-text blocks -> rich HTML
-      var t = esc(b.text || '');
-      var html = b.type === 'header' ? '<h4>'+t+'</h4>'
-               : b.type === 'bullet' ? '<ul><li>'+t+'</li></ul>'
-               : '<p>'+t+'</p>';
-      return { type:'rich', html:html };
-    })
+    body: body.length ? body : [{ type:'rich', html:'' }]
   };
 }
 
@@ -3871,6 +3931,8 @@ function renderMembersPane(wrap){
         + '<p class="panel__hint">Create a username and password, then share those credentials with the person. They sign in on their own device and can add entries; everything they add is stamped with their name and the time. Passwords here are lightweight — fine for tracking who did what, not for protecting secrets.</p>'
         + '<div class="memberform">'
           + '<label class="authfield">Username<input type="text" id="newUser" placeholder="e.g. maria"></label>'
+          + '<label class="authfield">Display name<input type="text" id="newName" placeholder="e.g. Maria Santos"></label>'
+          + '<label class="authfield">Email<input type="email" id="newEmail" placeholder="e.g. maria@company.com"></label>'
           + '<label class="authfield">Password<input type="text" id="newPw" placeholder="give them a starter password"></label>'
           + '<label class="authfield">Role<select id="newRole"><option value="member">Member</option><option value="admin">Admin</option></select></label>'
           + '<button type="button" class="btn" id="createUserBtn">Create user</button>'
@@ -3892,8 +3954,10 @@ function renderMembersPane(wrap){
       var u = wrap.querySelector('#newUser').value;
       var p = wrap.querySelector('#newPw').value;
       var role = wrap.querySelector('#newRole').value;
+      var dn = wrap.querySelector('#newName').value;
+      var em = wrap.querySelector('#newEmail').value;
       msg('Creating…');
-      AUTH.createUser(u, p, role).then(function(name){
+      AUTH.createUser(u, p, role, { displayName:dn, email:em }).then(function(name){
         msg('Created "'+name+'". Share these credentials — username: '+name+', password: '+p, true);
         refresh();
       }).catch(function(e){ msg(e.message || 'Could not create user.', false); });
@@ -3904,6 +3968,21 @@ function renderMembersPane(wrap){
       var r = row.querySelector('.memberrow__reset');
       var d = row.querySelector('.memberrow__del');
       var roleSel = row.querySelector('.memberrow__role');
+      var editBtn = row.querySelector('.memberrow__edit');
+      var editForm = row.querySelector('.memberrow__editform');
+      var saveBtn = row.querySelector('.memberrow__save');
+      var cancelEdit = row.querySelector('.memberrow__canceledit');
+      if (editBtn && editForm) editBtn.addEventListener('click', function(){
+        editForm.hidden = !editForm.hidden;
+      });
+      if (cancelEdit && editForm) cancelEdit.addEventListener('click', function(){ editForm.hidden = true; });
+      if (saveBtn && editForm) saveBtn.addEventListener('click', function(){
+        var dn = row.querySelector('.memberrow__editname').value;
+        var em = row.querySelector('.memberrow__editemail').value;
+        AUTH.updateUser(name, { displayName:dn, email:em })
+          .then(function(){ msg('Updated details for "'+name+'".', true); refresh(); })
+          .catch(function(e){ msg(e.message || 'Could not save details.', false); });
+      });
       if (r) r.addEventListener('click', function(){
         var np = prompt('New password for "'+name+'":');
         if (np == null) return;
@@ -3927,7 +4006,12 @@ function renderMembersPane(wrap){
     var meta = [];
     if (u.createdAt) meta.push('created '+esc(fmtStamp(u.createdAt)) + (u.createdBy ? ' by '+esc(u.createdBy) : ''));
     if (u.pwResetAt) meta.push('pw reset '+esc(fmtStamp(u.pwResetAt)));
+    if (u.updatedAt) meta.push('details edited '+esc(fmtStamp(u.updatedAt)) + (u.updatedBy ? ' by '+esc(u.updatedBy) : ''));
     var isPrimary = u.username === 'admin';
+    var details = [];
+    if (u.displayName) details.push(esc(u.displayName));
+    if (u.email) details.push(esc(u.email));
+    var detailLine = details.length ? details.join(' · ') : '<span class="memberrow__nodetail">No display name or email set</span>';
     return '<div class="memberrow" data-user="'+esc(u.username)+'">'
       + '<div class="memberrow__main">'
         + '<span class="memberrow__name">'+esc(u.username)+'</span>'
@@ -3936,10 +4020,20 @@ function renderMembersPane(wrap){
           + '<option value="admin"'+(u.role==='admin'?' selected':'')+'>Admin</option>'
         + '</select>'
       + '</div>'
+      + '<div class="memberrow__details">'+detailLine+'</div>'
       + '<div class="memberrow__meta">'+meta.join(' · ')+'</div>'
       + '<div class="memberrow__actions">'
+        + '<button type="button" class="btn btn--ghost memberrow__edit">Edit details</button>'
         + '<button type="button" class="btn btn--ghost memberrow__reset">Reset password</button>'
         + (isPrimary ? '' : '<button type="button" class="btn btn--danger memberrow__del">Remove</button>')
+      + '</div>'
+      + '<div class="memberrow__editform" hidden>'
+        + '<label class="authfield">Display name<input type="text" class="memberrow__editname" value="'+esc(u.displayName||'')+'" placeholder="e.g. Maria Santos"></label>'
+        + '<label class="authfield">Email<input type="email" class="memberrow__editemail" value="'+esc(u.email||'')+'" placeholder="e.g. maria@company.com"></label>'
+        + '<div class="memberrow__editactions">'
+          + '<button type="button" class="btn memberrow__save">Save details</button>'
+          + '<button type="button" class="btn btn--ghost memberrow__canceledit">Cancel</button>'
+        + '</div>'
       + '</div>'
     + '</div>';
   }

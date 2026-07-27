@@ -1013,7 +1013,7 @@ input[type="file"]{display:none;}
 
 /* members pane */
 .memberform{
-  display:grid; grid-template-columns:1fr 1fr auto auto; gap:12px; align-items:end;
+  display:grid; grid-template-columns:1fr 1fr 1fr 1fr auto auto; gap:12px; align-items:end;
 }
 .memberform .authfield{ margin:0; }
 .memberform .btn{ height:40px; }
@@ -1029,12 +1029,23 @@ input[type="file"]{display:none;}
   padding:5px 10px; border:1px solid var(--line-strong); border-radius:8px;
   font-size:13px; font-family:inherit; background:#fff; color:var(--ink);
 }
+.memberrow__details{ grid-column:1 / -1; font-size:13px; color:var(--ink-soft); }
+.memberrow__nodetail{ color:var(--muted); font-style:italic; }
 .memberrow__meta{ grid-column:1 / -1; font-size:11.5px; color:var(--muted); }
 .memberrow__actions{ display:flex; gap:8px; justify-self:end; }
 .memberrow__actions .btn{ padding:7px 12px; font-size:13px; }
+.memberrow__editform{
+  grid-column:1 / -1; display:grid; grid-template-columns:1fr 1fr; gap:12px; align-items:end;
+  margin-top:6px; padding:14px; background:var(--canvas);
+  border:1px solid var(--line); border-radius:10px;
+}
+.memberrow__editform .authfield{ margin:0; }
+.memberrow__editactions{ grid-column:1 / -1; display:flex; gap:8px; }
+.memberrow__editactions .btn{ padding:7px 12px; font-size:13px; }
 
 @media (max-width:720px){
   .memberform{ grid-template-columns:1fr 1fr; }
   .memberrow{ grid-template-columns:1fr; }
   .memberrow__actions{ justify-self:start; }
+  .memberrow__editform{ grid-template-columns:1fr; }
 }
