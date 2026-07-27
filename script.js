@@ -1823,22 +1823,24 @@ function platformBadge(platform, size){
   var bg = PLATFORM_BADGE_COLOR[platform] || '#1b2a4a';
   var code = platformCode(platform);          // 3-letter code, e.g. LZD / SHP / TTS / ZLR
   // 3 characters need a smaller font than a single initial so they fit the square.
-  // Outlook's VML box is unforgiving: at 0.27 the three bold letters overflow the
-  // 48px width and wrap to two lines ("LZ / D"). 0.23 with no letter-spacing keeps
-  // all three on one line in Word/Outlook while staying legible.
+  // At 0.27 the three bold letters overflowed the 48px width and wrapped to two
+  // lines in Outlook; 0.23 with no letter-spacing keeps all three on one line.
   var fontPx = Math.round(size * 0.23);
   var radius = Math.round(size * 0.22);          // ~22% — a soft square, not a pill
   var arc = (radius / size).toFixed(2);          // VML wants the radius as a ratio
 
   return ''
     // ---- Outlook only: VML rounded rectangle ----
+    // v-text-anchor:middle does the vertical centering. Do NOT also set a large
+    // line-height on <center> — that stacks a full box-height line on top of the
+    // anchor and pushes the letters clean out of the visible square.
     + '<!--[if mso]>'
       + '<v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" '
         + 'style="width:' + size + 'px;height:' + size + 'px;v-text-anchor:middle;mso-fit-shape-to-text:f;" '
         + 'arcsize="' + Math.round(arc * 100) + '%" stroke="f" fillcolor="' + bg + '">'
         + '<w:anchorlock/>'
-        + '<center style="color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:' + fontPx + 'px;font-weight:bold;mso-line-height-rule:exactly;line-height:' + size + 'px;white-space:nowrap;">'
-          + esc(code)
+        + '<center style="color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:' + fontPx + 'px;font-weight:bold;mso-line-height-rule:exactly;line-height:' + fontPx + 'px;">'
+          + '<span style="color:#ffffff;">' + esc(code) + '</span>'
         + '</center>'
       + '</v:roundrect>'
     + '<![endif]-->'
