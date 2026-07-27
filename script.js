@@ -594,6 +594,13 @@ function fmtDate(iso){
   return d.toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' });
 }
 
+function fmtStamp(ms){
+  if (!ms) return '—';
+  var d = new Date(ms);
+  if (isNaN(d.getTime())) return '—';
+  return d.toLocaleString('en-GB', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+}
+
 function downloadBlob(filename, blob){
   var url = URL.createObjectURL(blob);
   var a = document.createElement('a');
@@ -2560,6 +2567,8 @@ function renderAddPane(wrap){
       + '<td>'+esc(s.platform)+'</td>'
       + '<td>'+esc(s.region)+'</td>'
       + '<td>'+esc(s.date ? fmtDate(s.date) : (s.date_range||'—'))+'</td>'
+      + '<td>'+esc(s.createdBy || '—')+'</td>'
+      + '<td style="white-space:nowrap;">'+esc(fmtStamp(s.createdAt))+'</td>'
       + '<td style="white-space:nowrap;">'
         + '<button type="button" class="entrytable__act" data-edit="'+esc(s.id)+'">Edit</button>'
         + '<button type="button" class="entrytable__act entrytable__act--del" data-del="'+esc(s.id)+'">Delete</button>'
@@ -2614,7 +2623,7 @@ function renderAddPane(wrap){
             + '<div class="formactions__spacer"></div>'
             + '<button type="button" class="btn" id="archiveSelectedBtn" disabled>Archive selected</button>'
           + '</div>'
-          + '<table class="entrytable"><thead><tr><th class="entrytable__check"></th><th>Title</th><th>Platform</th><th>Region</th><th>Publish date</th><th></th></tr></thead><tbody>'+listRows+'</tbody></table>'
+          + '<table class="entrytable"><thead><tr><th class="entrytable__check"></th><th>Title</th><th>Platform</th><th>Region</th><th>Publish date</th><th>Added by</th><th>Timestamp</th><th></th></tr></thead><tbody>'+listRows+'</tbody></table>'
         : '<div class="detailblock__empty">No entries yet.</div>')
     + '</div>';
 
