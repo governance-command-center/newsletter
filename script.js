@@ -10,70 +10,192 @@ var ALLOWED_PLATFORMS = SEED.allowed_platforms.slice();
 var ALLOWED_REGIONS   = SEED.allowed_regions.slice();
 
 /* ============================================================
-   PERSISTENCE
-   The working set is saved to browser storage so edits, imports and deletions
-   survive a reload. Storage is per-browser and per-device — it is NOT a shared
-   database and NOT a backup. The source deck remains the system of record;
-   "Export as JSON" remains the way to move a working set between machines.
-   Wrapped in try/catch throughout: private-browsing modes and some embedded
-   webviews throw on localStorage access, in which case we fall back silently to
-   the old session-only behaviour rather than breaking the page.
+   PERSISTENCE  (IndexedDB)
+   The working set is saved to IndexedDB so edits, imports and deletions
+   survive a reload. IndexedDB is used instead of localStorage because
+   entries carry full-resolution base64 images: localStorage caps around
+   5MB, whereas IndexedDB typically allows hundreds of MB to GB. Storage is
+   still per-browser and per-device — NOT shared and NOT a backup. The source
+   deck remains the system of record; "Export as JSON" remains the way to move
+   a working set between machines.
+
+   saveSlides() stays synchronous-looking to all its callers: it kicks off an
+   async write and returns immediately (true = write started). Load is async
+   and happens once at startup, before the first render. If IndexedDB is
+   unavailable (private-mode webviews, ancient browsers) we fall back to
+   in-memory-only so the page never breaks; a one-time notice tells the user
+   their changes won't persist.
    ============================================================ */
-var LS_KEY = 'platformUpdates.slides.v1';
+var IDB_NAME = 'platformUpdates';
+var IDB_STORE = 'kv';
+var IDB_KEY = 'slides.v1';
+var LS_KEY = 'platformUpdates.slides.v1'; // legacy localStorage key, for one-time migration
 
-function storageAvailable(){
-  try {
-    var t = '__pu_probe__';
-    window.localStorage.setItem(t, '1');
-    window.localStorage.removeItem(t);
-    return true;
-  } catch (e) { return false; }
+var HAS_STORAGE = false;   // becomes true once IndexedDB opens successfully
+var _idb = null;           // open database handle
+var _idbWriteChain = Promise.resolve(); // serialise writes (last-write-wins, in order)
+
+function openIdb(){
+  return new Promise(function(resolve){
+    if (!window.indexedDB){ resolve(null); return; }
+    var req;
+    try { req = window.indexedDB.open(IDB_NAME, 1); }
+    catch (e){ resolve(null); return; }
+    req.onupgradeneeded = function(){
+      var db = req.result;
+      if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+    };
+    req.onsuccess = function(){ resolve(req.result); };
+    req.onerror   = function(){ resolve(null); };
+    req.onblocked = function(){ resolve(null); };
+  });
 }
-var HAS_STORAGE = storageAvailable();
 
+function idbGet(key){
+  return new Promise(function(resolve){
+    if (!_idb){ resolve(null); return; }
+    try {
+      var tx = _idb.transaction(IDB_STORE, 'readonly');
+      var rq = tx.objectStore(IDB_STORE).get(key);
+      rq.onsuccess = function(){ resolve(rq.result != null ? rq.result : null); };
+      rq.onerror   = function(){ resolve(null); };
+    } catch (e){ resolve(null); }
+  });
+}
+
+function idbSet(key, value){
+  return new Promise(function(resolve, reject){
+    if (!_idb){ reject(new Error('no-idb')); return; }
+    try {
+      var tx = _idb.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).put(value, key);
+      tx.oncomplete = function(){ resolve(true); };
+      tx.onerror    = function(){ reject(tx.error || new Error('idb-write')); };
+      tx.onabort    = function(){ reject(tx.error || new Error('idb-abort')); };
+    } catch (e){ reject(e); }
+  });
+}
+
+function idbDelete(key){
+  return new Promise(function(resolve){
+    if (!_idb){ resolve(); return; }
+    try {
+      var tx = _idb.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).delete(key);
+      tx.oncomplete = function(){ resolve(); };
+      tx.onerror    = function(){ resolve(); };
+    } catch (e){ resolve(); }
+  });
+}
+
+// Fire-and-forget save. Returns true if a write was queued, false if storage
+// is unavailable. Errors surface via setStatus but never throw to the caller.
 function saveSlides(){
   if (!HAS_STORAGE) return false;
-  try {
-    window.localStorage.setItem(LS_KEY, JSON.stringify({ savedAt: Date.now(), slides: slides }));
-    return true;
-  } catch (e) {
-    // Most likely the quota: slides carry base64 images and localStorage caps
-    // around 5MB. Tell the truth rather than pretending the save worked.
-    setStatus('Could not save to browser storage — you are probably over the ~5MB limit (slide images are the usual cause). Your changes are still live in this tab, but will be lost on reload. Export as JSON to keep them.', false);
-    return false;
-  }
+  var snapshot = { savedAt: Date.now(), slides: slides };
+  _idbWriteChain = _idbWriteChain.then(function(){
+    return idbSet(IDB_KEY, snapshot);
+  }).catch(function(e){
+    setStatus('Could not save to browser storage ('+(e && e.message ? e.message : 'unknown error')+'). Your changes are live in this tab but may be lost on reload — Export as JSON to keep them.', false);
+  });
+  return true;
 }
 
+// Async load used once at startup.
 function loadSavedSlides(){
-  if (!HAS_STORAGE) return null;
-  try {
-    var raw = window.localStorage.getItem(LS_KEY);
-    if (!raw) return null;
-    var parsed = JSON.parse(raw);
+  return idbGet(IDB_KEY).then(function(parsed){
+    if (!parsed) return null;
     var arr = Array.isArray(parsed) ? parsed : parsed.slides;
     if (!Array.isArray(arr) || !arr.length) return null;
     return { slides: arr, savedAt: parsed.savedAt || null };
-  } catch (e) { return null; }
+  });
 }
 
 function clearSavedSlides(){
-  if (!HAS_STORAGE) return;
-  try { window.localStorage.removeItem(LS_KEY); } catch (e) {}
+  _idbWriteChain = _idbWriteChain.then(function(){ return idbDelete(IDB_KEY); });
+}
+
+/* ------------------------------------------------------------------
+   ARCHIVES
+   Archived entries are moved OUT of the active `slides` set (so they drop out
+   of every browse/present/email/PDF view) and stored as named "batches" under
+   their own IndexedDB key. Nothing is deleted on archive — entries can be
+   restored to active, exported, or permanently removed batch-by-batch. Like
+   everything else this lives in THIS browser only; it is not an off-device
+   backup (the PDF and JSON exports are).
+   Batch shape: { id, label, archivedAt, slides: [ ...entry objects ] }
+   ------------------------------------------------------------------ */
+var IDB_ARCHIVE_KEY = 'archives.v1';
+var archives = [];   // loaded at startup
+
+function saveArchives(){
+  if (!HAS_STORAGE) return false;
+  var snapshot = { savedAt: Date.now(), archives: archives };
+  _idbWriteChain = _idbWriteChain.then(function(){
+    return idbSet(IDB_ARCHIVE_KEY, snapshot);
+  }).catch(function(e){
+    setStatus('Could not save archives to browser storage ('+(e && e.message ? e.message : 'unknown')+'). Export as JSON to keep them.', false);
+  });
+  return true;
+}
+
+function loadArchives(){
+  return idbGet(IDB_ARCHIVE_KEY).then(function(parsed){
+    if (!parsed) return [];
+    var arr = Array.isArray(parsed) ? parsed : parsed.archives;
+    return Array.isArray(arr) ? arr : [];
+  });
+}
+
+// One-time migration: if IndexedDB is empty but a legacy localStorage payload
+// exists, copy it into IndexedDB and clear the old key.
+function migrateFromLocalStorage(){
+  var raw = null;
+  try { raw = window.localStorage.getItem(LS_KEY); } catch (e){ return Promise.resolve(null); }
+  if (!raw) return Promise.resolve(null);
+  var parsed;
+  try { parsed = JSON.parse(raw); } catch (e){ return Promise.resolve(null); }
+  var arr = Array.isArray(parsed) ? parsed : (parsed && parsed.slides);
+  if (!Array.isArray(arr) || !arr.length) return Promise.resolve(null);
+  var payload = { savedAt: (parsed && parsed.savedAt) || Date.now(), slides: arr };
+  return idbSet(IDB_KEY, payload).then(function(){
+    try { window.localStorage.removeItem(LS_KEY); } catch (e){}
+    return { slides: arr, savedAt: payload.savedAt };
+  }).catch(function(){ return null; });
 }
 
 // live, mutable working set. Seeded from the deck baked into index.html, then
-// overridden by anything previously saved to browser storage (see initSlides()).
+// overridden by anything previously saved to storage (see initSlides()).
 var slides = SEED.slides.slice();
 var restoredFrom = null;
 
+// Async init: open IDB, migrate legacy data if needed, then load. Resolves when
+// `slides` reflects persisted state (or the seed if none). Callers await this
+// before the first render.
 function initSlides(){
-  var saved = loadSavedSlides();
-  if (saved){
-    slides = saved.slides;
-    restoredFrom = saved.savedAt;
-  }
+  return openIdb().then(function(db){
+    _idb = db;
+    HAS_STORAGE = !!db;
+    if (!HAS_STORAGE) return null;
+    return loadSavedSlides().then(function(saved){
+      if (saved) return saved;
+      return migrateFromLocalStorage(); // only runs if IDB had nothing
+    });
+  }).then(function(saved){
+    if (saved){
+      slides = saved.slides;
+      restoredFrom = saved.savedAt;
+    }
+    // load archives too (independent of whether active slides were restored)
+    return loadArchives().then(function(arr){
+      archives = arr || [];
+      return true;
+    });
+  }).catch(function(){
+    HAS_STORAGE = false;
+    return true;
+  });
 }
-initSlides();
 
 /* ============================================================
    STATE
@@ -112,7 +234,7 @@ var NAV_META = {
   add:      { title: 'Add entry', sub: 'Add a new update directly, or edit an existing one.' },
   import:   { title: 'Import slides', sub: 'Bring in a PowerPoint deck or a JSON backup.' },
   export:   { title: 'Export slides', sub: 'Download the current view as PDF or JSON.' },
-  digest:   { title: 'Regional digests', sub: 'Inline-styled HTML emails, one per region.' },
+  archive:  { title: 'Archive', sub: 'Set aside past entries to keep the current set clean. Restore or export any batch later.' },
   email:    { title: 'Generate email', sub: 'A leadership briefing you can preview and paste straight into your inbox.' }
 };
 
@@ -145,10 +267,13 @@ function normalizeRegion(raw){
 
 function nextId(){
   var max = 0;
-  slides.forEach(function(s){
+  var scan = function(s){
     var n = parseInt(String(s.id||'').replace(/\D/g,''),10);
     if (!isNaN(n)) max = Math.max(max, n);
-  });
+  };
+  slides.forEach(scan);
+  // also scan archived entries so restoring a batch can't collide with a new id
+  archives.forEach(function(b){ (b.slides||[]).forEach(scan); });
   return 's' + String(max+1).padStart(3,'0');
 }
 
@@ -156,6 +281,70 @@ function nextSlideNum(){
   var max = 0;
   slides.forEach(function(s){ if (typeof s.slide_num === 'number') max = Math.max(max, s.slide_num); });
   return max + 1;
+}
+
+/* ---- Archive operations ------------------------------------------ */
+function newBatchId(){
+  return 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+}
+
+// Move the given entry ids out of active `slides` into a new named batch.
+function archiveEntries(ids, label){
+  var idset = {};
+  ids.forEach(function(id){ idset[id] = true; });
+  var moved = slides.filter(function(s){ return idset[s.id]; });
+  if (!moved.length) return null;
+  slides = slides.filter(function(s){ return !idset[s.id]; });
+  var batch = {
+    id: newBatchId(),
+    label: (label && label.trim()) || ('Archive ' + fmtDate(new Date().toISOString().slice(0,10))),
+    archivedAt: Date.now(),
+    slides: moved
+  };
+  archives.unshift(batch); // newest first
+  // any archived entry that was open in the browse feed should close
+  moved.forEach(function(s){ state.openCards.delete(s.id); });
+  state.execHtml = null; state.digestHtml = null;
+  saveSlides();
+  saveArchives();
+  return batch;
+}
+
+// Restore selected entries (or a whole batch) back into active `slides`.
+// If an id would clash with a current active entry, it's given a fresh id.
+function restoreFromBatch(batchId, ids){
+  var batch = archives.find(function(b){ return b.id === batchId; });
+  if (!batch) return 0;
+  var idset = ids ? (function(){ var m={}; ids.forEach(function(i){ m[i]=true; }); return m; })() : null;
+  var activeIds = {};
+  slides.forEach(function(s){ activeIds[s.id] = true; });
+
+  var toRestore = batch.slides.filter(function(s){ return !idset || idset[s.id]; });
+  toRestore.forEach(function(s){
+    var copy = JSON.parse(JSON.stringify(s));
+    if (activeIds[copy.id]) copy.id = nextId(); // avoid collision
+    activeIds[copy.id] = true;
+    slides.push(copy);
+  });
+  // remove restored entries from the batch; drop the batch if now empty
+  batch.slides = batch.slides.filter(function(s){ return !(!idset || idset[s.id]); });
+  if (!batch.slides.length){
+    archives = archives.filter(function(b){ return b.id !== batchId; });
+  }
+  state.execHtml = null; state.digestHtml = null;
+  saveSlides();
+  saveArchives();
+  return toRestore.length;
+}
+
+function deleteBatch(batchId){
+  archives = archives.filter(function(b){ return b.id !== batchId; });
+  saveArchives();
+}
+
+function renameBatch(batchId, label){
+  var batch = archives.find(function(b){ return b.id === batchId; });
+  if (batch){ batch.label = label.trim() || batch.label; saveArchives(); }
 }
 
 function fmtDate(iso){
@@ -194,7 +383,11 @@ function matchesFilters(s){
   if (state.search){
     var q = state.search.toLowerCase();
     var hay = (s.title + ' ' + s.platform + ' ' + s.region + ' ' +
-      s.body.map(function(b){ return b.text || ''; }).join(' ')).toLowerCase();
+      s.body.map(function(b){
+        if (b.type === 'rich') return richToText(b.html);
+        if (b.type === 'table') return (b.rows||[]).map(function(r){ return r.join(' '); }).join(' ');
+        return b.text || '';
+      }).join(' ')).toLowerCase();
     if (hay.indexOf(q) === -1) return false;
   }
   return true;
@@ -289,7 +482,12 @@ function renderFilterRail(){
 function renderBody(body, forPrint){
   var html = '';
   body.forEach(function(b){
-    if (b.type === 'header'){
+    if (b.type === 'rich'){
+      // Rich blocks store already-sanitised HTML (see sanitizeRichHtml on save).
+      // Render it directly rather than escaping. Empty rich blocks are skipped.
+      var safe = sanitizeRichHtml(b.html || '');
+      if (safe.trim()) html += '<div class="rich">'+safe+'</div>';
+    } else if (b.type === 'header'){
       html += '<h4>'+esc(b.text)+'</h4>';
     } else if (b.type === 'para'){
       html += '<p>'+esc(b.text)+'</p>';
@@ -314,9 +512,98 @@ function renderBody(body, forPrint){
   return html;
 }
 
+/* ------------------------------------------------------------------
+   RICH-TEXT SANITISER
+   The detail editor is a contenteditable surface, so pasted content can carry
+   arbitrary markup. On save (and again on render, defensively) we run it through
+   a whitelist: only a small set of formatting tags and safe attributes survive.
+   Everything else is unwrapped (keeping its text) or dropped. No <script>,
+   <style>, event handlers, or javascript: URLs can get through.
+   ------------------------------------------------------------------ */
+var RICH_ALLOWED_TAGS = { B:1,STRONG:1,I:1,EM:1,U:1,H4:1,H5:1,UL:1,OL:1,LI:1,P:1,BR:1,A:1,SPAN:1,DIV:1 };
+var RICH_ALLOWED_STYLES = { 'color':1, 'font-size':1, 'font-weight':1, 'text-decoration':1 };
+
+function sanitizeRichHtml(html){
+  if (!html) return '';
+  var doc;
+  try {
+    doc = new DOMParser().parseFromString('<div id="__root">'+html+'</div>', 'text/html');
+  } catch (e){ return ''; }
+  var root = doc.getElementById('__root');
+  if (!root) return '';
+
+  (function walk(node){
+    var children = Array.prototype.slice.call(node.childNodes);
+    children.forEach(function(child){
+      if (child.nodeType === 3) return;            // text: keep
+      if (child.nodeType !== 1){ child.remove(); return; } // comments etc: drop
+
+      var tag = child.tagName;
+      if (tag === 'SCRIPT' || tag === 'STYLE'){ child.remove(); return; }
+
+      if (!RICH_ALLOWED_TAGS[tag]){
+        // unwrap: replace the element with its (recursively cleaned) children
+        walk(child);
+        while (child.firstChild) child.parentNode.insertBefore(child.firstChild, child);
+        child.remove();
+        return;
+      }
+
+      // strip all attributes except a safe subset
+      Array.prototype.slice.call(child.attributes).forEach(function(attr){
+        var name = attr.name.toLowerCase();
+        if (name === 'href' && tag === 'A'){
+          var v = attr.value.trim();
+          // only http/https/mailto; block javascript: and data: URLs
+          if (!/^(https?:|mailto:)/i.test(v)){ child.removeAttribute(attr.name); }
+        } else if (name === 'style'){
+          var cleaned = cleanInlineStyle(attr.value);
+          if (cleaned) child.setAttribute('style', cleaned); else child.removeAttribute('style');
+        } else {
+          child.removeAttribute(attr.name);
+        }
+      });
+      if (tag === 'A'){
+        child.setAttribute('target','_blank');
+        child.setAttribute('rel','noopener');
+      }
+      walk(child);
+    });
+  })(root);
+
+  return root.innerHTML;
+}
+
+function cleanInlineStyle(style){
+  var out = [];
+  String(style).split(';').forEach(function(decl){
+    var idx = decl.indexOf(':');
+    if (idx === -1) return;
+    var prop = decl.slice(0, idx).trim().toLowerCase();
+    var val = decl.slice(idx+1).trim();
+    if (!RICH_ALLOWED_STYLES[prop]) return;
+    if (/url\s*\(|expression|javascript:/i.test(val)) return; // no image/script tricks
+    out.push(prop + ':' + val);
+  });
+  return out.join(';');
+}
+
+// Plain-text version of a rich block, used for search haystacks and excerpts.
+function richToText(html){
+  if (!html) return '';
+  try {
+    var doc = new DOMParser().parseFromString('<div>'+html+'</div>', 'text/html');
+    return (doc.body.textContent || '').replace(/\s+/g,' ').trim();
+  } catch (e){ return ''; }
+}
+
 function excerptOf(s){
-  var firstPara = s.body.find(function(b){ return b.type === 'para'; });
-  return firstPara ? firstPara.text : '';
+  for (var i=0;i<s.body.length;i++){
+    var b = s.body[i];
+    if (b.type === 'para' && b.text) return b.text;
+    if (b.type === 'rich'){ var t = richToText(b.html); if (t) return t; }
+  }
+  return '';
 }
 
 /* ============================================================
@@ -1043,25 +1330,26 @@ function currentExportScope(){
   return scopeEl ? scopeEl.value : 'filtered';
 }
 
-function exportJson(){
+function exportJson(listArg, labelArg){
   var scope = currentExportScope();
-  var list = scope === 'filtered' ? filteredSlides() : slides;
+  var list = listArg || (scope === 'filtered' ? filteredSlides() : slides);
   if (!list.length){ setStatus('Nothing to export — the current selection has no slides.', false); return; }
   var stamp = new Date().toISOString().slice(0,10);
   var payload = {
     allowed_platforms: ALLOWED_PLATFORMS,
     allowed_regions: ALLOWED_REGIONS,
     exported_at: new Date().toISOString(),
-    scope: scope,
+    scope: labelArg || scope,
     slides: list
   };
-  download('newsletter-updates-'+scope+'-'+stamp+'.json', JSON.stringify(payload, null, 2), 'application/json');
-  setStatus('Exported '+list.length+' slide'+(list.length===1?'':'s')+' as JSON ('+scope+'). Use this file to re-import into this tool.', true);
+  var slug = (labelArg ? labelArg.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'') : scope) || 'export';
+  download('newsletter-updates-'+slug+'-'+stamp+'.json', JSON.stringify(payload, null, 2), 'application/json');
+  setStatus('Exported '+list.length+' slide'+(list.length===1?'':'s')+' as JSON. Use this file to re-import into this tool.', true);
 }
 
-function buildPrintDoc(list){
+function buildPrintDoc(list, titleLabel){
   var g = groupAndOrder(list);
-  var scopeLabel = currentExportScope() === 'all' ? 'All updates' : 'Filtered view';
+  var scopeLabel = titleLabel || (currentExportScope() === 'all' ? 'All updates' : 'Filtered view');
   var html = '<div class="pdf-doc">'
     + '<h1 class="pdf-doc__title">Platform Updates</h1>'
     + '<p class="pdf-doc__sub">'+esc(scopeLabel)+' · Grouped by '+(state.view === 'region' ? 'Region' : 'Platform')+' · Exported '+esc(new Date().toLocaleString())+' · '+list.length+' update'+(list.length===1?'':'s')+'</p>';
@@ -1083,13 +1371,13 @@ function buildPrintDoc(list){
   return html;
 }
 
-function exportPdf(){
+function exportPdf(listArg, labelArg){
   var scope = currentExportScope();
-  var list = scope === 'filtered' ? filteredSlides() : slides;
+  var list = listArg || (scope === 'filtered' ? filteredSlides() : slides);
   if (!list.length){ setStatus('Nothing to export — the current selection has no slides.', false); return; }
 
   var printArea = document.getElementById('printArea');
-  printArea.innerHTML = buildPrintDoc(list);
+  printArea.innerHTML = buildPrintDoc(list, labelArg);
 
   var imgs = Array.prototype.slice.call(printArea.querySelectorAll('img'));
   if (!imgs.length){
@@ -1295,60 +1583,6 @@ function buildEmailHtml(list, opts){
 + '</table>'
 + '</td></tr></table>'
 + '</body></html>';
-}
-
-function exportEmailDigest(){
-  var audience = document.getElementById('emailAudience').value;
-  var baseUrl = document.getElementById('emailBaseUrl').value.trim();
-  var region = audience === '__all__' ? null : audience;
-  var list = slidesForAudience(region);
-
-  if (!list.length){
-    setStatus('Nothing to include — no slides match the current filters'+(region ? ' for '+region : '')+'.', false);
-    return;
-  }
-
-  var html = buildEmailHtml(list, {
-    audienceLabel: region || 'All regions',
-    groupByRegion: !region,
-    baseUrl: baseUrl
-  });
-
-  var stamp = new Date().toISOString().slice(0,10);
-  var slug = region ? region.toLowerCase() : 'all-regions';
-  download('email-digest-'+slug+'-'+stamp+'.html', html, 'text/html');
-  setStatus('Downloaded the email digest for '+(region || 'all regions')+' ('+list.length+' update'+(list.length===1?'':'s')+'). Open the .html file and copy its contents into your email client, or forward it as an HTML attachment.', true);
-}
-
-async function exportAllRegionalDigests(){
-  var baseUrl = document.getElementById('emailBaseUrl').value.trim();
-  var zip = new JSZip();
-  var stamp = new Date().toISOString().slice(0,10);
-  var included = 0;
-
-  ALLOWED_REGIONS.forEach(function(region){
-    var list = slidesForAudience(region);
-    if (!list.length) return;
-    var html = buildEmailHtml(list, { audienceLabel: region, groupByRegion: false, baseUrl: baseUrl });
-    zip.file('email-digest-'+region.toLowerCase()+'-'+stamp+'.html', html);
-    included++;
-  });
-
-  var allList = slidesForAudience(null);
-  if (allList.length){
-    zip.file('email-digest-all-regions-'+stamp+'.html', buildEmailHtml(allList, { audienceLabel: 'All regions', groupByRegion: true, baseUrl: baseUrl }));
-    included++;
-  }
-
-  if (!included){
-    setStatus('Nothing to export — no slides match the current Platform/Date/Search filters.', false);
-    return;
-  }
-
-  setStatus('Zipping '+included+' digest'+(included===1?'':'s')+'…', true);
-  var blob = await zip.generateAsync({ type: 'blob' });
-  downloadBlob('email-digests-'+stamp+'.zip', blob);
-  setStatus('Downloaded '+included+' regional email digest'+(included===1?'':'s')+' as a zip.', true);
 }
 
 
@@ -1834,49 +2068,8 @@ function renderExecPreview(){
 }
 
 /* ============================================================
-   REGIONAL DIGEST — inline preview (mirrors the exec preview)
+   EXECUTIVE EMAIL — generate & preview
    ============================================================ */
-function previewRegionalDigest(){
-  var audience = state.emailAudience;
-  var region = audience === '__all__' ? null : audience;
-  var list = slidesForAudience(region);
-  var wrap = document.getElementById('digestPreviewWrap');
-  if (!list.length){
-    if (wrap) wrap.innerHTML = '';
-    setStatus('Nothing to preview — no slides match the current filters'+(region ? ' for '+region : '')+'.', false);
-    return;
-  }
-  var html = buildEmailHtml(list, {
-    audienceLabel: region || 'All regions',
-    groupByRegion: !region,
-    baseUrl: state.emailBaseUrl.trim()
-  });
-  state.digestHtml = html;
-
-  wrap.innerHTML =
-    '<div class="emailpreview">'
-      + '<div class="emailpreview__bar">'
-        + '<span class="emailpreview__label">Digest preview — '+esc(region || 'All regions')+'</span>'
-        + '<button type="button" class="btn copybtn" id="digestCopyBtn"><span class="copybtn__toast">Copied — paste into your email</span>Copy for email</button>'
-        + '<button type="button" class="btn btn--ghost" id="digestDownloadBtn">Download .html</button>'
-      + '</div>'
-      + '<iframe id="digestPreviewFrame" title="Regional digest preview"></iframe>'
-    + '</div>';
-  document.getElementById('digestPreviewFrame').srcdoc = html;
-
-  document.getElementById('digestCopyBtn').addEventListener('click', function(){
-    var btn = this;
-    copyRichEmail(html, function(){
-      flashToast(btn);
-      setStatus('Copied. Paste into a new email — layout and links come across as previewed.', true);
-    }, function(){
-      setStatus('Couldn\'t copy automatically. Use "Download .html", open the file, then select-all and copy.', false);
-    });
-  });
-  document.getElementById('digestDownloadBtn').addEventListener('click', exportEmailDigest);
-  setStatus('Preview ready for '+(region || 'all regions')+' ('+list.length+' update'+(list.length===1?'':'s')+'). Copy it for email, or download the HTML.', true);
-}
-
 async function generateExecEmail(){
   var scope = currentExecScope();
   var list = scope === 'all' ? slides : filteredSlides();
@@ -1919,7 +2112,7 @@ function renderWorkspace(){
   if (state.nav === 'add')         renderAddPane(wrap);
   else if (state.nav === 'import') renderImportPane(wrap);
   else if (state.nav === 'export') renderExportPane(wrap);
-  else if (state.nav === 'digest') renderDigestPane(wrap);
+  else if (state.nav === 'archive') renderArchivePane(wrap);
   else if (state.nav === 'email')  renderEmailPane(wrap);
 }
 
@@ -1932,7 +2125,8 @@ function renderWorkspace(){
    draft and overwrites it on save.
    ============================================================ */
 
-// A fresh, empty draft for the Add form.
+// A fresh draft for the Add form, pre-seeded with one empty text block so the
+// editor is visible immediately.
 function blankDraft(){
   return {
     id: null,               // null = new; otherwise editing an existing slide
@@ -1942,11 +2136,13 @@ function blankDraft(){
     date_range: '',
     title: '',
     link: '',
-    body: []
+    body: [{ type:'rich', html:'' }]
   };
 }
 
-// Turn an existing slide into an editable draft (deep-ish copy of body).
+// Turn an existing slide into an editable draft. Legacy text blocks
+// (para/header/bullet, from the seed deck or PPTX import) are converted to the
+// unified "rich" block so they load into the rich editor; image/table are kept.
 function draftFromSlide(s){
   return {
     id: s.id,
@@ -1957,11 +2153,15 @@ function draftFromSlide(s){
     title: s.title || '',
     link: s.link || '',
     body: (s.body || []).map(function(b){
-      var c = { type: b.type };
-      if (b.type === 'table'){ c.rows = (b.rows||[]).map(function(r){ return r.slice(); }); }
-      else if (b.type === 'image'){ c.file = b.file || ''; c.dataUrl = b.dataUrl || null; }
-      else { c.text = b.text || ''; }
-      return c;
+      if (b.type === 'table') return { type:'table', rows:(b.rows||[]).map(function(r){ return r.slice(); }) };
+      if (b.type === 'image') return { type:'image', file:b.file||'', dataUrl:b.dataUrl||null };
+      if (b.type === 'rich')  return { type:'rich', html:b.html||'' };
+      // legacy plain-text blocks -> rich HTML
+      var t = esc(b.text || '');
+      var html = b.type === 'header' ? '<h4>'+t+'</h4>'
+               : b.type === 'bullet' ? '<ul><li>'+t+'</li></ul>'
+               : '<p>'+t+'</p>';
+      return { type:'rich', html:html };
     })
   };
 }
@@ -1974,7 +2174,9 @@ function startEditEntry(id){
   setNav('add');
 }
 
-// Build a body-block editor row.
+// Build a body-block editor row. Text content lives in a single "rich" block
+// type edited via a contenteditable surface with a formatting toolbar; images
+// and tables remain dedicated block types.
 function detailBlockHtml(b, i){
   var ctrls =
     '<div class="detailblock__ctrls">'
@@ -1983,8 +2185,9 @@ function detailBlockHtml(b, i){
       + '<button type="button" class="detailblock__btn detailblock__btn--del" data-act="del" data-i="'+i+'" title="Remove">&#10005;</button>'
     + '</div>';
 
-  var kindLabel = { para:'Paragraph', header:'Header', bullet:'Bullet', image:'Image', table:'Table' }[b.type] || b.type;
+  var kindLabel = { rich:'Text', image:'Image', table:'Table' }[b.type] || b.type;
   var inner;
+
   if (b.type === 'image'){
     inner = '<div class="detailblock__img">'
       + (b.dataUrl ? '<img src="'+b.dataUrl+'" alt="preview">' : '<div class="detailblock__empty">No image chosen</div>')
@@ -1995,18 +2198,56 @@ function detailBlockHtml(b, i){
       + '</div>'
     + '</div>';
   } else if (b.type === 'table'){
-    // Tables are rare in hand-entry; edit as tab/newline text for simplicity.
     var asText = (b.rows||[]).map(function(r){ return r.join('\t'); }).join('\n');
-    inner = '<textarea data-i="'+i+'" data-field="table" placeholder="One row per line, cells separated by TAB">'+esc(asText)+'</textarea>';
+    inner = '<textarea data-i="'+i+'" data-field="table" placeholder="One row per line, cells separated by TAB. First row is the header.">'+esc(asText)+'</textarea>';
   } else {
-    var ph = b.type === 'header' ? 'Section header' : (b.type === 'bullet' ? 'Bullet point' : 'Paragraph text');
-    inner = '<textarea data-i="'+i+'" data-field="text" placeholder="'+ph+'">'+esc(b.text||'')+'</textarea>';
+    // rich text block: toolbar + contenteditable
+    inner = richEditorHtml(b, i);
   }
 
   return '<div class="detailblock detailblock--'+b.type+'">'
     + '<div class="detailblock__top"><span class="detailblock__kind">'+esc(kindLabel)+'</span>'+ctrls+'</div>'
     + inner
   + '</div>';
+}
+
+// Formatting toolbar + editable surface for one rich block.
+function richEditorHtml(b, i){
+  var btn = function(cmd, arg, label, title){
+    return '<button type="button" class="rtb__btn" data-rt="'+cmd+'"'
+      + (arg!=null?' data-arg="'+esc(arg)+'"':'')
+      + ' data-i="'+i+'" title="'+esc(title||label)+'">'+label+'</button>';
+  };
+  var toolbar =
+    '<div class="rtb">'
+      + btn('bold', null, '<strong>B</strong>', 'Bold')
+      + btn('italic', null, '<em>I</em>', 'Italic')
+      + btn('underline', null, '<u>U</u>', 'Underline')
+      + '<span class="rtb__sep"></span>'
+      + btn('formatBlock', 'H4', 'H', 'Header')
+      + btn('insertUnorderedList', null, '&#8226; List', 'Bullet list')
+      + '<span class="rtb__sep"></span>'
+      + '<select class="rtb__select" data-rt="fontSize" data-i="'+i+'" title="Font size">'
+        + '<option value="">Size</option>'
+        + '<option value="2">Small</option>'
+        + '<option value="3">Normal</option>'
+        + '<option value="5">Large</option>'
+        + '<option value="6">X-Large</option>'
+      + '</select>'
+      + '<label class="rtb__color" title="Text colour"><span>A</span>'
+        + '<input type="color" class="rtb__colorinput" data-rt="foreColor" data-i="'+i+'" value="#1f5fd8">'
+      + '</label>'
+      + '<span class="rtb__sep"></span>'
+      + btn('createLink', null, '&#128279; Link', 'Add link')
+      + btn('unlink', null, 'Unlink', 'Remove link')
+    + '</div>';
+
+  var content = sanitizeRichHtml(b.html || '');
+  var editor = '<div class="rtb__editor" contenteditable="true" data-i="'+i+'" '
+    + 'data-placeholder="Type here. Select text, then use the toolbar to format.">'
+    + content + '</div>';
+
+  return toolbar + editor;
 }
 
 function renderAddPane(wrap){
@@ -2016,13 +2257,14 @@ function renderAddPane(wrap){
 
   var blocksHtml = d.body.length
     ? d.body.map(detailBlockHtml).join('')
-    : '<div class="detailblock__empty" style="padding:14px;text-align:center;">No details yet — add a paragraph, bullet, header or image below.</div>';
+    : '<div class="detailblock__empty" style="padding:14px;text-align:center;">No details yet — add a text block, image or table below.</div>';
 
-  // Existing entries list (for quick edit/delete without leaving the pane)
+  // Existing entries list (edit/delete + select-to-archive)
   var listRows = slides.slice().sort(function(a,b){
     return (b.date||'').localeCompare(a.date||'') || (a.title||'').localeCompare(b.title||'');
   }).map(function(s){
     return '<tr>'
+      + '<td class="entrytable__check"><input type="checkbox" class="archiveCheck" data-id="'+esc(s.id)+'" aria-label="Select for archive"></td>'
       + '<td class="entrytable__title">'+esc(s.title)+'</td>'
       + '<td>'+esc(s.platform)+'</td>'
       + '<td>'+esc(s.region)+'</td>'
@@ -2037,7 +2279,7 @@ function renderAddPane(wrap){
   wrap.innerHTML =
     '<div class="panel">'
       + '<div class="panel__head"><h2 class="panel__title">'+(editing?'Edit entry':'Add a new entry')+'</h2></div>'
-      + '<p class="panel__hint">Fill in the update below. <strong>Details</strong> can mix paragraphs, bullets, section headers and images — the same building blocks used everywhere else in the tool, so this entry will appear in the browse views, presentation, email summaries and PDF export.</p>'
+      + '<p class="panel__hint">Fill in the update below. <strong>Details</strong> is a rich-text editor — type freely, then select text and use the toolbar for <strong>bold</strong>, italic, headers, bullet lists, font size, colour and links. Add separate blocks for images and tables. Everything flows into the browse views, presentation, email summary and PDF export.</p>'
 
       + '<div class="formgrid">'
         + '<div class="formfield"><label>Platform</label><select id="fPlatform">'+optionsHtml(ALLOWED_PLATFORMS, d.platform)+'</select></div>'
@@ -2051,9 +2293,7 @@ function renderAddPane(wrap){
       + '<div class="detailhead">'
         + '<span class="detailhead__title">Details</span>'
         + '<div class="detailhead__actions">'
-          + '<button type="button" class="miniadd" data-add="para">+ Paragraph</button>'
-          + '<button type="button" class="miniadd" data-add="bullet">+ Bullet</button>'
-          + '<button type="button" class="miniadd" data-add="header">+ Header</button>'
+          + '<button type="button" class="miniadd" data-add="rich">+ Text block</button>'
           + '<button type="button" class="miniadd" data-add="image">+ Image</button>'
           + '<button type="button" class="miniadd" data-add="table">+ Table</button>'
         + '</div>'
@@ -2070,9 +2310,15 @@ function renderAddPane(wrap){
 
     + '<div class="panel">'
       + '<div class="panel__head"><h2 class="panel__title">Existing entries ('+slides.length+')</h2></div>'
-      + '<p class="panel__hint">Edit or remove any entry. Changes are saved to this browser.</p>'
+      + '<p class="panel__hint">Edit or remove any entry. Tick entries and use <strong>Archive selected</strong> to set them aside — archived entries leave the browse, presentation and email/PDF views but can be restored anytime from the Archive tab. Saved to this browser.</p>'
       + (slides.length
-        ? '<table class="entrytable"><thead><tr><th>Title</th><th>Platform</th><th>Region</th><th>Period</th><th></th></tr></thead><tbody>'+listRows+'</tbody></table>'
+        ? '<div class="archivebar">'
+            + '<label class="archivebar__all"><input type="checkbox" id="archiveSelectAll"> Select all</label>'
+            + '<span class="archivebar__count" id="archiveCount">0 selected</span>'
+            + '<div class="formactions__spacer"></div>'
+            + '<button type="button" class="btn" id="archiveSelectedBtn" disabled>Archive selected</button>'
+          + '</div>'
+          + '<table class="entrytable"><thead><tr><th class="entrytable__check"></th><th>Title</th><th>Platform</th><th>Region</th><th>Period</th><th></th></tr></thead><tbody>'+listRows+'</tbody></table>'
         : '<div class="detailblock__empty">No entries yet.</div>')
     + '</div>';
 
@@ -2080,7 +2326,7 @@ function renderAddPane(wrap){
 }
 
 // Read current field values from the DOM into the draft (so a re-render — e.g.
-// after adding a detail block — doesn't lose typed-but-unsaved input).
+// after adding/moving a detail block — doesn't lose typed-but-unsaved input).
 function syncDraftFromForm(){
   var d = state.editDraft; if (!d) return;
   var g = function(id){ var el = document.getElementById(id); return el ? el.value : ''; };
@@ -2090,16 +2336,19 @@ function syncDraftFromForm(){
   d.date_range = g('fRange');
   d.title = g('fTitle');
   d.link = g('fLink');
-  // detail block text
-  document.querySelectorAll('#detailBlocks textarea').forEach(function(ta){
-    var i = parseInt(ta.getAttribute('data-i'), 10);
-    var field = ta.getAttribute('data-field');
+
+  // rich contenteditable blocks -> sanitised HTML
+  document.querySelectorAll('#detailBlocks .rtb__editor').forEach(function(ed){
+    var i = parseInt(ed.getAttribute('data-i'), 10);
     if (isNaN(i) || !d.body[i]) return;
-    if (field === 'table'){
-      d.body[i].rows = ta.value.split('\n').map(function(line){ return line.split('\t'); });
-    } else {
-      d.body[i].text = ta.value;
-    }
+    d.body[i].html = sanitizeRichHtml(ed.innerHTML);
+  });
+
+  // table textareas
+  document.querySelectorAll('#detailBlocks textarea[data-field="table"]').forEach(function(ta){
+    var i = parseInt(ta.getAttribute('data-i'), 10);
+    if (isNaN(i) || !d.body[i]) return;
+    d.body[i].rows = ta.value.split('\n').map(function(line){ return line.split('\t'); });
   });
 }
 
@@ -2118,10 +2367,46 @@ function wireAddPane(wrap){
       syncDraftFromForm();
       var kind = btn.getAttribute('data-add');
       if (kind === 'image') d.body.push({ type:'image', file:'', dataUrl:null });
-      else if (kind === 'table') d.body.push({ type:'table', rows:[['','']] });
-      else d.body.push({ type:kind, text:'' });
+      else if (kind === 'table') d.body.push({ type:'table', rows:[['',''],['','']] });
+      else d.body.push({ type:'rich', html:'' });
       renderAddPane(wrap);
+      // focus the newly added editor if it's a text block
+      if (kind === 'rich'){
+        var eds = wrap.querySelectorAll('.rtb__editor');
+        if (eds.length) eds[eds.length-1].focus();
+      }
     });
+  });
+
+  // rich editors: sync to draft on input/blur, WITHOUT re-rendering (so the
+  // caret and selection survive). Re-render only happens on structural changes.
+  wrap.querySelectorAll('.rtb__editor').forEach(function(ed){
+    var sync = function(){
+      var i = parseInt(ed.getAttribute('data-i'), 10);
+      if (!isNaN(i) && d.body[i]) d.body[i].html = sanitizeRichHtml(ed.innerHTML);
+    };
+    ed.addEventListener('input', sync);
+    ed.addEventListener('blur', sync);
+  });
+
+  // toolbar buttons (execCommand scoped to the focused editor)
+  wrap.querySelectorAll('.rtb__btn').forEach(function(btn){
+    // use mousedown so the editor doesn't lose selection before the command runs
+    btn.addEventListener('mousedown', function(e){
+      e.preventDefault();
+      var cmd = btn.getAttribute('data-rt');
+      var arg = btn.getAttribute('data-arg');
+      applyRichCommand(cmd, arg, btn, d);
+    });
+  });
+  wrap.querySelectorAll('.rtb__select[data-rt="fontSize"]').forEach(function(sel){
+    sel.addEventListener('change', function(){
+      if (sel.value) applyRichCommand('fontSize', sel.value, sel, d);
+      sel.value = '';
+    });
+  });
+  wrap.querySelectorAll('.rtb__colorinput').forEach(function(inp){
+    inp.addEventListener('input', function(){ applyRichCommand('foreColor', inp.value, inp, d); });
   });
 
   // move / delete detail blocks
@@ -2186,6 +2471,87 @@ function wireAddPane(wrap){
       setStatus('Deleted "'+s.title+'". '+slides.length+' remaining.', true);
     });
   });
+
+  // --- archive selection ---
+  var checks = wrap.querySelectorAll('.archiveCheck');
+  var selectAll = document.getElementById('archiveSelectAll');
+  var countEl = document.getElementById('archiveCount');
+  var archiveBtn = document.getElementById('archiveSelectedBtn');
+
+  function selectedIds(){
+    return Array.prototype.slice.call(wrap.querySelectorAll('.archiveCheck'))
+      .filter(function(c){ return c.checked; })
+      .map(function(c){ return c.getAttribute('data-id'); });
+  }
+  function refreshArchiveBar(){
+    var n = selectedIds().length;
+    if (countEl) countEl.textContent = n + ' selected';
+    if (archiveBtn) archiveBtn.disabled = (n === 0);
+    if (selectAll) selectAll.checked = (n > 0 && n === checks.length);
+  }
+  checks.forEach(function(c){ c.addEventListener('change', refreshArchiveBar); });
+  if (selectAll){
+    selectAll.addEventListener('change', function(){
+      checks.forEach(function(c){ c.checked = selectAll.checked; });
+      refreshArchiveBar();
+    });
+  }
+  if (archiveBtn){
+    archiveBtn.addEventListener('click', function(){
+      var ids = selectedIds();
+      if (!ids.length) return;
+      var label = window.prompt('Name this archive batch (e.g. "July newsletter", "Jun–Jul crossover"):', 'Archive ' + fmtDate(new Date().toISOString().slice(0,10)));
+      if (label === null) return; // cancelled
+      var batch = archiveEntries(ids, label);
+      if (batch){
+        renderAddPane(wrap);
+        setStatus('Archived '+batch.slides.length+' entr'+(batch.slides.length===1?'y':'ies')+' to "'+batch.label+'". '+slides.length+' active remaining. Open the Archive tab to restore or export.', true);
+      }
+    });
+  }
+}
+
+// Run a formatting command against the currently-focused rich editor. The
+// button lives outside the editor, so we resolve the editor by its data-i and
+// make sure a selection inside it is active before issuing the command.
+function applyRichCommand(cmd, arg, srcEl, d){
+  var i = parseInt(srcEl.getAttribute('data-i'), 10);
+  var editor = document.querySelector('.rtb__editor[data-i="'+i+'"]');
+  if (!editor) return;
+
+  // ensure focus/selection is inside this editor
+  var sel = window.getSelection();
+  var inEditor = sel.rangeCount && editor.contains(sel.anchorNode);
+  if (!inEditor){
+    editor.focus();
+    // place caret at end if nothing selected
+    var range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  try {
+    if (cmd === 'createLink'){
+      var url = window.prompt('Link URL (https://…):', 'https://');
+      if (!url) return;
+      if (!/^(https?:|mailto:)/i.test(url)) url = 'https://' + url.replace(/^\/+/, '');
+      document.execCommand('createLink', false, url);
+    } else if (cmd === 'formatBlock'){
+      // toggle: if already a header, go back to paragraph
+      document.execCommand('formatBlock', false, arg);
+    } else if (cmd === 'fontSize'){
+      document.execCommand('fontSize', false, arg);
+    } else if (cmd === 'foreColor'){
+      document.execCommand('foreColor', false, arg);
+    } else {
+      document.execCommand(cmd, false, null);
+    }
+  } catch (e){ /* execCommand can throw in odd states; ignore */ }
+
+  // sync sanitised HTML back to the draft
+  if (!isNaN(i) && d.body[i]) d.body[i].html = sanitizeRichHtml(editor.innerHTML);
 }
 
 function saveEntry(wrap){
@@ -2197,7 +2563,7 @@ function saveEntry(wrap){
   if (!d.region){ setStatus('Pick a region.', false); return; }
   if (d.date && !/^\d{4}-\d{2}-\d{2}$/.test(d.date)){ setStatus('Date must be a valid calendar date.', false); return; }
 
-  // clean up body: drop empty text blocks and empty table rows
+  // clean up body: drop empty rich blocks, empty table rows, imageless image blocks
   var body = d.body.map(function(b){
     if (b.type === 'table'){
       var rows = (b.rows||[]).map(function(r){ return r.map(function(c){ return String(c).trim(); }); })
@@ -2205,14 +2571,15 @@ function saveEntry(wrap){
       return { type:'table', rows:rows };
     }
     if (b.type === 'image') return { type:'image', file:b.file||'', dataUrl:b.dataUrl||null };
-    return { type:b.type, text:String(b.text||'').trim() };
+    // rich
+    return { type:'rich', html:sanitizeRichHtml(b.html||'') };
   }).filter(function(b){
     if (b.type === 'table') return b.rows.length;
     if (b.type === 'image') return !!b.dataUrl || !!b.file;
-    return b.text !== '';
+    return richToText(b.html) !== '' || /<(img|br)/i.test(b.html); // keep non-empty text
   });
 
-  if (!body.length){ setStatus('Add at least one detail (paragraph, bullet, header, image or table).', false); return; }
+  if (!body.length){ setStatus('Add at least one detail — a text block, image or table.', false); return; }
 
   var payload = {
     platform: normalizePlatform(d.platform),
@@ -2445,6 +2812,141 @@ function renderImportPane(wrap){
   if (state.pptxPreview) renderPptxPreview();
 }
 
+function renderArchivePane(wrap){
+  if (!archives.length){
+    wrap.innerHTML =
+      '<div class="panel">'
+        + '<div class="panel__head"><h2 class="panel__title">Archive</h2></div>'
+        + '<p class="panel__hint">No archived batches yet. To archive: go to <strong>Add entry</strong>, tick the entries you want to set aside, and click <strong>Archive selected</strong>. They\'ll leave the browse, presentation and email/PDF views but stay here — restore or export them anytime.</p>'
+        + '<div class="archivenote">Archives live in this browser only — they are not an off-device backup. Your permanent record is the exported PDF (and JSON, for re-import).</div>'
+      + '</div>';
+    return;
+  }
+
+  var batchHtml = archives.map(function(b){
+    var rows = b.slides.slice().sort(function(a,c){
+      return (c.date||'').localeCompare(a.date||'') || (a.title||'').localeCompare(c.title||'');
+    }).map(function(s){
+      return '<tr>'
+        + '<td class="entrytable__check"><input type="checkbox" class="restoreCheck" data-batch="'+esc(b.id)+'" data-id="'+esc(s.id)+'" aria-label="Select to restore"></td>'
+        + '<td class="entrytable__title">'+esc(s.title)+'</td>'
+        + '<td>'+esc(s.platform)+'</td>'
+        + '<td>'+esc(s.region)+'</td>'
+        + '<td>'+esc(s.date ? fmtDate(s.date) : (s.date_range||'—'))+'</td>'
+      + '</tr>';
+    }).join('');
+
+    return '<div class="panel archivebatch" data-batch="'+esc(b.id)+'">'
+      + '<div class="archivebatch__head">'
+        + '<div>'
+          + '<h2 class="panel__title archivebatch__label" data-batch="'+esc(b.id)+'">'+esc(b.label)+'</h2>'
+          + '<div class="archivebatch__meta">'+b.slides.length+' entr'+(b.slides.length===1?'y':'ies')+' · archived '+esc(fmtDate(new Date(b.archivedAt).toISOString().slice(0,10)))+'</div>'
+        + '</div>'
+        + '<div class="archivebatch__actions">'
+          + '<button type="button" class="btn btn--ghost btnsm" data-arch-rename="'+esc(b.id)+'">Rename</button>'
+          + '<button type="button" class="btn btn--ghost btnsm" data-arch-pdf="'+esc(b.id)+'">Export PDF</button>'
+          + '<button type="button" class="btn btn--ghost btnsm" data-arch-json="'+esc(b.id)+'">Export JSON</button>'
+          + '<button type="button" class="btn btn--danger btnsm" data-arch-delete="'+esc(b.id)+'">Delete batch</button>'
+        + '</div>'
+      + '</div>'
+      + '<div class="archivebar">'
+        + '<label class="archivebar__all"><input type="checkbox" class="restoreSelectAll" data-batch="'+esc(b.id)+'"> Select all</label>'
+        + '<div class="formactions__spacer"></div>'
+        + '<button type="button" class="btn btnsm" data-arch-restore="'+esc(b.id)+'" disabled>Restore selected</button>'
+        + '<button type="button" class="btn btn--ghost btnsm" data-arch-restoreall="'+esc(b.id)+'">Restore all</button>'
+      + '</div>'
+      + '<table class="entrytable"><thead><tr><th class="entrytable__check"></th><th>Title</th><th>Platform</th><th>Region</th><th>Period</th></tr></thead><tbody>'+rows+'</tbody></table>'
+    + '</div>';
+  }).join('');
+
+  wrap.innerHTML =
+    '<div class="panel">'
+      + '<div class="panel__head"><h2 class="panel__title">Archive ('+archives.length+' batch'+(archives.length===1?'':'es')+')</h2></div>'
+      + '<p class="panel__hint">Archived batches. Restore entries back to the active set, or export a batch to PDF/JSON. Deleting a batch is permanent.</p>'
+      + '<div class="archivenote">Archives live in this browser only — not an off-device backup. Your permanent record is the exported PDF (and JSON, for re-import).</div>'
+    + '</div>'
+    + batchHtml;
+
+  wireArchivePane(wrap);
+}
+
+function wireArchivePane(wrap){
+  function selInBatch(batchId){
+    return Array.prototype.slice.call(wrap.querySelectorAll('.restoreCheck[data-batch="'+batchId+'"]'))
+      .filter(function(c){ return c.checked; }).map(function(c){ return c.getAttribute('data-id'); });
+  }
+  function refreshBatchBar(batchId){
+    var n = selInBatch(batchId).length;
+    var btn = wrap.querySelector('[data-arch-restore="'+batchId+'"]');
+    if (btn) btn.disabled = (n === 0);
+    var all = wrap.querySelector('.restoreSelectAll[data-batch="'+batchId+'"]');
+    var total = wrap.querySelectorAll('.restoreCheck[data-batch="'+batchId+'"]').length;
+    if (all) all.checked = (n > 0 && n === total);
+  }
+
+  wrap.querySelectorAll('.restoreCheck').forEach(function(c){
+    c.addEventListener('change', function(){ refreshBatchBar(c.getAttribute('data-batch')); });
+  });
+  wrap.querySelectorAll('.restoreSelectAll').forEach(function(all){
+    all.addEventListener('change', function(){
+      var bid = all.getAttribute('data-batch');
+      wrap.querySelectorAll('.restoreCheck[data-batch="'+bid+'"]').forEach(function(c){ c.checked = all.checked; });
+      refreshBatchBar(bid);
+    });
+  });
+
+  wrap.querySelectorAll('[data-arch-restore]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var bid = btn.getAttribute('data-arch-restore');
+      var ids = selInBatch(bid);
+      if (!ids.length) return;
+      var n = restoreFromBatch(bid, ids);
+      renderArchivePane(wrap);
+      setStatus('Restored '+n+' entr'+(n===1?'y':'ies')+' to the active set ('+slides.length+' active now).', true);
+    });
+  });
+  wrap.querySelectorAll('[data-arch-restoreall]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var bid = btn.getAttribute('data-arch-restoreall');
+      var n = restoreFromBatch(bid, null);
+      renderArchivePane(wrap);
+      setStatus('Restored all '+n+' entr'+(n===1?'y':'ies')+' from the batch ('+slides.length+' active now).', true);
+    });
+  });
+  wrap.querySelectorAll('[data-arch-pdf]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var b = archives.find(function(x){ return x.id === btn.getAttribute('data-arch-pdf'); });
+      if (b) exportPdf(b.slides, b.label);
+    });
+  });
+  wrap.querySelectorAll('[data-arch-json]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var b = archives.find(function(x){ return x.id === btn.getAttribute('data-arch-json'); });
+      if (b) exportJson(b.slides, b.label);
+    });
+  });
+  wrap.querySelectorAll('[data-arch-rename]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var b = archives.find(function(x){ return x.id === btn.getAttribute('data-arch-rename'); });
+      if (!b) return;
+      var label = window.prompt('Rename this batch:', b.label);
+      if (label === null) return;
+      renameBatch(b.id, label);
+      renderArchivePane(wrap);
+    });
+  });
+  wrap.querySelectorAll('[data-arch-delete]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var b = archives.find(function(x){ return x.id === btn.getAttribute('data-arch-delete'); });
+      if (!b) return;
+      if (!window.confirm('Permanently delete the batch "'+b.label+'" and its '+b.slides.length+' entr'+(b.slides.length===1?'y':'ies')+'? This cannot be undone. (Tip: Export it first if you might need it.)')) return;
+      deleteBatch(b.id);
+      renderArchivePane(wrap);
+      setStatus('Deleted batch "'+b.label+'".', true);
+    });
+  });
+}
+
 function renderExportPane(wrap){
   wrap.innerHTML =
     '<div class="panel">'
@@ -2498,8 +3000,8 @@ function renderExportPane(wrap){
       + '</div>'
     + '</div>';
 
-  document.getElementById('exportPdfBtn').addEventListener('click', exportPdf);
-  document.getElementById('exportJsonBtn').addEventListener('click', exportJson);
+  document.getElementById('exportPdfBtn').addEventListener('click', function(){ exportPdf(); });
+  document.getElementById('exportJsonBtn').addEventListener('click', function(){ exportJson(); });
 
   function refreshCount(){
     var el = document.getElementById('delCount');
@@ -2580,33 +3082,6 @@ function renderExportPane(wrap){
   });
 
   refreshCount();
-}
-
-function renderDigestPane(wrap){
-  wrap.innerHTML =
-    '<div class="panel">'
-      + '<div class="panel__head"><h2 class="panel__title">Regional digests</h2></div>'
-      + '<p class="panel__hint">Inline-styled HTML emails that render in Outlook and Gmail with no JavaScript on the reader\'s end, each opening with a "this issue at a glance" summary. Uses the Platform / Date / Search filters; Region is set by the Audience picker below rather than the region chips. Each update links out to its source and, optionally, back to this tool.</p>'
-      + '<div class="fieldrow">'
-        + '<label>Audience<select id="emailAudience">'
-          + '<option value="__all__"'+(state.emailAudience==='__all__'?' selected':'')+'>All regions (grouped by region)</option>'
-          + ALLOWED_REGIONS.map(function(r){ return '<option value="'+esc(r)+'"'+(state.emailAudience===r?' selected':'')+'>'+esc(r)+' only</option>'; }).join('')
-        + '</select></label>'
-        + '<label style="flex:1;min-width:240px;">Digest base URL (optional — adds an "Open the full interactive digest" link)<input type="text" id="emailBaseUrl" placeholder="https://yourteam.github.io/platform-updates/" value="'+esc(state.emailBaseUrl)+'"></label>'
-      + '</div>'
-      + '<div class="adminpanel__row">'
-        + '<button type="button" class="btn" id="digestPreviewBtn">Preview digest</button>'
-        + '<button type="button" class="btn btn--ghost" id="exportEmailBtn">Download email HTML</button>'
-        + '<button type="button" class="btn btn--ghost" id="exportEmailAllBtn">Download all regional digests (.zip)</button>'
-      + '</div>'
-      + '<div id="digestPreviewWrap"></div>'
-    + '</div>';
-
-  document.getElementById('emailAudience').addEventListener('change', function(e){ state.emailAudience = e.target.value; });
-  document.getElementById('emailBaseUrl').addEventListener('input', function(e){ state.emailBaseUrl = e.target.value; });
-  document.getElementById('digestPreviewBtn').addEventListener('click', previewRegionalDigest);
-  document.getElementById('exportEmailBtn').addEventListener('click', exportEmailDigest);
-  document.getElementById('exportEmailAllBtn').addEventListener('click', exportAllRegionalDigests);
 }
 
 function renderEmailPane(wrap){
@@ -2750,8 +3225,16 @@ document.addEventListener('DOMContentLoaded', function(){
   document.getElementById('searchInput').value = state.search;
   initChrome();
   initPresentControls();
-  setNav(state.nav, { silent:true });
-  applyHashDeepLink();
+
+  // Storage is async now: open IndexedDB (and migrate any legacy localStorage
+  // data) before the first render so restored entries appear immediately.
+  initSlides().then(function(){
+    if (!HAS_STORAGE){
+      setStatus('Browser storage is unavailable here, so changes won\'t persist after you close this tab. Use Export as JSON to save your work.', false);
+    }
+    setNav(state.nav, { silent:true });
+    applyHashDeepLink();
+  });
 });
 
 })();
