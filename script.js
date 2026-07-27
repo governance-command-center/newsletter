@@ -3613,11 +3613,13 @@ function applyNavVisibility(){
   });
 }
 
-var ADMIN_ONLY_NAVS = { add:1, import:1, export:1, archive:1, email:1, members:1 };
+// Only the Members tab is admin-only now. All other admin tabs (add, import,
+// export, archive, email) are available to any signed-in member.
+var ADMIN_ONLY_NAVS = { members:1 };
 function setNav(nav, opts){
   opts = opts || {};
 
-  // Guard admin-only surfaces: members without admin role fall back to browse.
+  // Guard admin-only surfaces: non-admins fall back to browse.
   if (ADMIN_ONLY_NAVS[nav] && !(window.AUTH && AUTH.isAdmin())){
     nav = 'browse';
   }
@@ -3888,15 +3890,19 @@ function renderLoginGate(){
   setTimeout(function(){ var el = g.querySelector('#loginUser'); if (el) el.focus(); }, 50);
 }
 
-/* ---- Role-based chrome: hide admin-only nav from members, show who's in ---- */
+/* ---- Role-based chrome: everyone sees the admin tools except Members ---- */
 function applyRoleVisibility(){
   var admin = AUTH.isAdmin();
-  var adminNav = document.getElementById('adminNav');
-  if (adminNav) adminNav.style.display = admin ? '' : 'none';
 
-  // Members tab lives in the admin nav group; ensure a nav button exists.
+  // The admin nav group (Add entry, Export, Generate email, Archive, …) is now
+  // available to all signed-in users, so keep it visible for everyone.
+  var adminNav = document.getElementById('adminNav');
+  if (adminNav) adminNav.style.display = '';
+
+  // Members tab stays admin-only — hide the button from non-admins so other
+  // people's credentials aren't exposed.
   var membersBtn = document.querySelector('.nav__item[data-nav="members"]');
-  if (admin && membersBtn) membersBtn.style.display = '';
+  if (membersBtn) membersBtn.style.display = admin ? '' : 'none';
 
   // Session bar (who am I + logout) in the sidebar footer.
   var foot = document.querySelector('.sidebar__foot');
