@@ -221,7 +221,7 @@ var state = {
   digestHtml: null,           // last generated regional digest HTML
   selectedForDelete: new Set(),  // slide ids ticked in the Manage/Delete pane
   editDraft: null,            // in-progress add/edit entry (null until the Add pane builds one)
-  present: { list: [], index: 0 }  // presentation session: ordered slides + cursor
+  present: { list: [], index: 0, dateFilter: '__all__' }  // presentation session: ordered slides + cursor + publish-date filter
 };
 
 var BROWSE_VIEWS = { browse: true };
@@ -1582,8 +1582,8 @@ function buildEmailHtml(list, opts){
     var rows = items.map(function(s){
       var accent = PLATFORM_BADGE_COLOR[s.platform] || '#1b2a4a';
       var linkEl = s.link
-        ? '<a href="'+esc(s.link)+'" style="font-size:13px;font-weight:bold;color:'+accent+';text-decoration:none;">'
-            + '<font color="'+accent+'" style="color:'+accent+';">Read more &#8594;</font></a>'
+        ? '<a href="'+esc(s.link)+'" style="font-size:13px;font-weight:bold;color:#111111;text-decoration:none;">'
+            + '<font color="#111111" style="color:#111111;">Read more &#8594;</font></a>'
         : '';
 
       // No inline expander. <details> is ignored by Outlook, which renders the
@@ -1668,6 +1668,21 @@ function reportingPeriodLabel(list){
   }
   var dr = list.map(function(s){ return s.date_range; }).filter(Boolean)[0];
   return dr || 'Current period';
+}
+
+// The "Period covered — label" (free-form date_range on the entries) is used as
+// the headline period in the email intro. Falls back to the computed reporting
+// period when no label was set.
+function periodCoveredLabel(list){
+  var dr = list.map(function(s){ return s.date_range; }).filter(Boolean)[0];
+  return dr || reportingPeriodLabel(list);
+}
+
+// Default leadership-facing intro line that opens the Executive Summary, e.g.
+// "Key highlights for Jun 29 – Jul 3 from Lazada, Shopee, Tiktok and Zalora."
+// Lists the platforms that actually have updates in scope, in the canonical order.
+function execIntroLine(list){
+  return 'Key highlights for ' + periodCoveredLabel(list) + ' from Lazada, Shopee, TikTok and Zalora.';
 }
 
 // Heuristic 0+ score — higher means more likely to need seller/leadership attention.
@@ -1838,7 +1853,7 @@ function platformBadge(platform, size){
             + 'color:#ffffff;font-family:Arial,Helvetica,sans-serif;'
             + 'font-size:' + fontPx + 'px;font-weight:bold;line-height:1;letter-spacing:.5px;'
             + 'mso-line-height-rule:exactly;">'
-            + esc(code)
+            + '<font color="#ffffff" style="color:#ffffff;">' + esc(code) + '</font>'
           + '</td>'
         + '</tr>'
       + '</table>'
@@ -1892,13 +1907,14 @@ function buildExecEmailHtml(list, criticalList, opts){
     + '</td>';
   }).join('');
 
+  var introText = execIntroLine(list);
   var summaryText = generateExecSummary(list, criticalList);
 
   var criticalHtml = criticalList.map(function(s, i){
     var accent = PLATFORM_BADGE_COLOR[s.platform] || '#1b2a4a';
     var linkEl = s.link
-      ? '<a href="' + esc(s.link) + '" style="display:inline-block;font-size:13px;color:' + accent + ';text-decoration:none;font-weight:bold;">'
-          + '<font color="' + accent + '" style="color:' + accent + ';">Read more &#8594;</font></a>'
+      ? '<a href="' + esc(s.link) + '" style="display:inline-block;font-size:13px;color:#111111;text-decoration:none;font-weight:bold;">'
+          + '<font color="#111111" style="color:#111111;">Read more &#8594;</font></a>'
       : '';
 
     // Every row uses the lettered, platform-coloured badge — no image thumbnails.
@@ -1950,10 +1966,10 @@ function buildExecEmailHtml(list, criticalList, opts){
   + '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f4;"><tr><td align="center" style="padding:28px 12px;">'
   + '<table role="presentation" width="640" cellpadding="0" cellspacing="0" style="background:#ffffff;max-width:640px;width:100%;border:1px solid #dfe3e8;">'
 
-    + '<tr><td style="background:#1b2a4a;padding:30px 32px;font-family:Arial,Helvetica,sans-serif;">'
-      + '<div style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#8fa3c7;">Executive Briefing</div>'
-      + '<div style="font-size:25px;font-weight:800;color:#ffffff;margin-top:6px;">Platform Updates</div>'
-      + '<div style="font-size:14px;color:#c3ceda;margin-top:6px;">Reporting period: ' + esc(periodLabel) + '</div>'
+    + '<tr><td bgcolor="#1b2a4a" style="background:#1b2a4a;background-color:#1b2a4a;padding:30px 32px;font-family:Arial,Helvetica,sans-serif;">'
+      + '<div style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#8fa3c7;"><font color="#8fa3c7" style="color:#8fa3c7;">Executive Briefing</font></div>'
+      + '<div style="font-size:25px;font-weight:800;color:#ffffff;margin-top:6px;"><font color="#ffffff" style="color:#ffffff;">Platform Updates</font></div>'
+      + '<div style="font-size:14px;color:#c3ceda;margin-top:6px;"><font color="#c3ceda" style="color:#c3ceda;">Reporting period: ' + esc(periodLabel) + '</font></div>'
     + '</td></tr>'
 
     + (countsHtml ? '<tr><td style="padding:20px 32px 18px;border-bottom:1px solid #e3e7ec;">'
@@ -1964,7 +1980,10 @@ function buildExecEmailHtml(list, criticalList, opts){
       + '<div style="font-size:13px;font-weight:700;color:#1b2a4a;text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px;">Executive Summary</div>'
       + '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;"><tr>'
         + '<td bgcolor="#1b2a4a" width="3" style="background-color:#1b2a4a;width:3px;font-size:0;line-height:0;">&nbsp;</td>'
-        + '<td bgcolor="#f4f6f8" style="background-color:#f4f6f8;padding:16px 18px;font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#3d4552;line-height:1.65;">' + esc(summaryText) + '</td>'
+        + '<td bgcolor="#f4f6f8" style="background-color:#f4f6f8;padding:16px 18px;font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#3d4552;line-height:1.65;">'
+          + '<div style="font-weight:bold;color:#1b2a4a;margin-bottom:8px;"><font color="#1b2a4a" style="color:#1b2a4a;">' + esc(introText) + '</font></div>'
+          + esc(summaryText)
+        + '</td>'
       + '</tr></table>'
     + '</td></tr>'
 
@@ -2319,7 +2338,7 @@ function renderAddPane(wrap){
       + '<div class="formgrid">'
         + '<div class="formfield"><label>Platform</label><select id="fPlatform">'+optionsHtml(ALLOWED_PLATFORMS, d.platform)+'</select></div>'
         + '<div class="formfield"><label>Region</label><select id="fRegion">'+optionsHtml(ALLOWED_REGIONS, d.region)+'</select></div>'
-        + '<div class="formfield"><label>Period covered — date</label><input type="date" id="fDate" value="'+esc(d.date)+'"><span class="formfield__hint">Drives sorting, filtering and the presentation grouping.</span></div>'
+        + '<div class="formfield"><label>Publish date</label><input type="date" id="fDate" value="'+esc(d.date)+'"><span class="formfield__hint">Drives sorting, filtering and the presentation grouping.</span></div>'
         + '<div class="formfield"><label>Period covered — label (optional)</label><input type="text" id="fRange" value="'+esc(d.date_range)+'" placeholder="e.g. Jun 29 – Jul 3"><span class="formfield__hint">Display text shown on the entry; free-form.</span></div>'
         + '<div class="formfield formfield--wide"><label>Title</label><input type="text" id="fTitle" value="'+esc(d.title)+'" placeholder="Headline for this update"></div>'
         + '<div class="formfield formfield--wide"><label>Link / URL (optional)</label><input type="url" id="fLink" value="'+esc(d.link)+'" placeholder="https://…"></div>'
@@ -2666,6 +2685,11 @@ function saveEntry(wrap){
    ============================================================ */
 function buildPresentOrder(){
   var list = filteredSlides().slice();
+  // Narrow to a single publish date when one is chosen in the present bar.
+  var df = state.present.dateFilter;
+  if (df && df !== '__all__'){
+    list = list.filter(function(s){ return (s.date || '') === df; });
+  }
   var regionRank = function(r){ var i = ALLOWED_REGIONS.indexOf(r); return i === -1 ? 999 : i; };
   var platRank = function(p){ var i = ALLOWED_PLATFORMS.indexOf(p); return i === -1 ? 999 : i; };
   list.sort(function(a,b){
@@ -2679,7 +2703,29 @@ function buildPresentOrder(){
   return list;
 }
 
+// Build the "Publish date" dropdown in the present bar from the publish dates
+// present in the current filtered set. Keeps the current selection if it still
+// exists, otherwise falls back to "All dates".
+function populatePresentDates(){
+  var sel = document.getElementById('presentDateSelect');
+  if (!sel) return;
+  var seen = {};
+  filteredSlides().forEach(function(s){ if (s.date) seen[s.date] = true; });
+  var dates = Object.keys(seen).sort().reverse(); // newest first
+  if (state.present.dateFilter !== '__all__' && !seen[state.present.dateFilter]){
+    state.present.dateFilter = '__all__';
+  }
+  var opts = '<option value="__all__">All dates ('+filteredSlides().length+')</option>';
+  opts += dates.map(function(d){
+    var n = filteredSlides().filter(function(s){ return (s.date||'') === d; }).length;
+    return '<option value="'+esc(d)+'"'+(state.present.dateFilter===d?' selected':'')+'>'+esc(fmtDate(d))+' ('+n+')</option>';
+  }).join('');
+  sel.innerHTML = opts;
+  sel.value = state.present.dateFilter;
+}
+
 function openPresentation(){
+  populatePresentDates();
   var list = buildPresentOrder();
   state.present.list = list;
   state.present.index = 0;
@@ -2767,6 +2813,16 @@ function initPresentControls(){
   document.getElementById('presentPrev').addEventListener('click', function(){ presentGo(-1); });
   document.getElementById('presentNext').addEventListener('click', function(){ presentGo(1); });
   document.getElementById('presentClose').addEventListener('click', closePresentation);
+
+  var dateSel = document.getElementById('presentDateSelect');
+  if (dateSel){
+    dateSel.addEventListener('change', function(){
+      state.present.dateFilter = dateSel.value || '__all__';
+      state.present.list = buildPresentOrder();
+      state.present.index = 0;
+      renderPresent();
+    });
+  }
   document.addEventListener('keydown', function(e){
     var ov = document.getElementById('presentOverlay');
     if (!ov || ov.hidden) return;

@@ -758,6 +758,17 @@ input[type="file"]{display:none;}
 .present__crumbsep{color:#5a729b;}
 .present__controls{display:flex;align-items:center;gap:8px;flex:none;}
 .present__counter{font-family:var(--mono);font-size:12px;color:#9fb4d6;margin-right:6px;}
+.present__datepick{display:flex;align-items:center;gap:6px;margin-right:10px;}
+.present__datepick-label{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#9fb4d6;}
+.present__datepick select{
+  background:rgba(255,255,255,.08);color:#e8eef7;border:1px solid rgba(255,255,255,.22);
+  border-radius:6px;padding:5px 8px;font-size:12px;font-family:inherit;cursor:pointer;
+}
+.present__datepick select:hover{background:rgba(255,255,255,.15);}
+.present__datepick select option{color:#1b2a4a;background:#ffffff;}
+@media (max-width:640px){
+  .present__datepick-label{display:none;}
+}
 .present__btn{
   width:40px;height:40px;border-radius:10px;cursor:pointer;
   border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06);
