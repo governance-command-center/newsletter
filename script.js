@@ -1823,23 +1823,24 @@ function platformBadge(platform, size){
   var bg = PLATFORM_BADGE_COLOR[platform] || '#1b2a4a';
   var code = platformCode(platform);          // 3-letter code, e.g. LZD / SHP / TTS / ZLR
   // 3 characters need a smaller font than a single initial so they fit the square.
-  // At 0.27 the three bold letters overflowed the 48px width and wrapped to two
-  // lines in Outlook; 0.23 with no letter-spacing keeps all three on one line.
-  var fontPx = Math.round(size * 0.23);
+  // 0.21 keeps the widest code (SHP) comfortably inside the 48px box with room to
+  // spare on the left/right so the rounded corners never clip a glyph.
+  var fontPx = Math.round(size * 0.21);
   var radius = Math.round(size * 0.22);          // ~22% — a soft square, not a pill
   var arc = (radius / size).toFixed(2);          // VML wants the radius as a ratio
 
   return ''
     // ---- Outlook only: VML rounded rectangle ----
-    // v-text-anchor:middle does the vertical centering. Do NOT also set a large
-    // line-height on <center> — that stacks a full box-height line on top of the
-    // anchor and pushes the letters clean out of the visible square.
+    // Vertical centering here is done purely by line-height == box height (the
+    // reliable Outlook trick). We deliberately do NOT combine it with
+    // v-text-anchor:middle, because stacking the two centering mechanisms is what
+    // threw the letters out of / to the top of the square in earlier versions.
     + '<!--[if mso]>'
       + '<v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" '
-        + 'style="width:' + size + 'px;height:' + size + 'px;v-text-anchor:middle;mso-fit-shape-to-text:f;" '
+        + 'style="width:' + size + 'px;height:' + size + 'px;mso-fit-shape-to-text:f;" '
         + 'arcsize="' + Math.round(arc * 100) + '%" stroke="f" fillcolor="' + bg + '">'
         + '<w:anchorlock/>'
-        + '<center style="color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:' + fontPx + 'px;font-weight:bold;mso-line-height-rule:exactly;line-height:' + fontPx + 'px;">'
+        + '<center style="color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:' + fontPx + 'px;font-weight:bold;mso-line-height-rule:exactly;line-height:' + size + 'px;text-align:center;">'
           + '<span style="color:#ffffff;">' + esc(code) + '</span>'
         + '</center>'
       + '</v:roundrect>'
@@ -1972,8 +1973,7 @@ function buildExecEmailHtml(list, criticalList, opts){
   + '<table role="presentation" width="640" cellpadding="0" cellspacing="0" style="background:#ffffff;max-width:640px;width:100%;border:1px solid #dfe3e8;">'
 
     + '<tr><td bgcolor="#1b2a4a" style="background:#1b2a4a;background-color:#1b2a4a;padding:30px 32px;font-family:Arial,Helvetica,sans-serif;">'
-      + '<div style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#8fa3c7;"><font color="#8fa3c7" style="color:#8fa3c7;">Executive Briefing</font></div>'
-      + '<div style="font-size:25px;font-weight:800;color:#ffffff;margin-top:6px;"><font color="#ffffff" style="color:#ffffff;">Platform Updates</font></div>'
+      + '<div style="font-size:25px;font-weight:800;color:#ffffff;"><font color="#ffffff" style="color:#ffffff;">Platform Updates</font></div>'
       + '<div style="font-size:14px;color:#c3ceda;margin-top:6px;"><font color="#c3ceda" style="color:#c3ceda;">Reporting period: ' + esc(periodLabel) + '</font></div>'
     + '</td></tr>'
 
@@ -2339,9 +2339,13 @@ function renderAddPane(wrap){
         + '<span class="detailhead__title">Details</span>'
         + '<div class="detailhead__actions">'
           + '<button type="button" class="miniadd" data-add="rich">+ Text block</button>'
-          + '<button type="button" class="miniadd" data-add="image"'
-            + (d.body.filter(function(b){ return b.type==='image'; }).length >= 2 ? ' disabled title="Maximum of 2 images reached"' : '')
-            + '>+ Image</button>'
+          + (function(){
+              var imgBlocks = d.body.filter(function(b){ return b.type==='image'; }).length;
+              var atMax = imgBlocks >= 2;
+              return '<button type="button" class="miniadd" data-add="image"'
+                + (atMax ? ' disabled title="Maximum of 2 images reached — remove one to add another"' : '')
+                + '>+ Image' + (imgBlocks ? ' (' + imgBlocks + '/2)' : '') + '</button>';
+            })()
         + '</div>'
       + '</div>'
       + '<div class="detailblocks" id="detailBlocks">'+blocksHtml+'</div>'

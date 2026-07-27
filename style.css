@@ -675,6 +675,8 @@ input[type="file"]{display:none;}
   font-size:11.5px;font-weight:600;cursor:pointer;
 }
 .miniadd:hover{background:var(--accent-soft);border-color:var(--accent);}
+.miniadd[disabled]{opacity:.4;cursor:not-allowed;color:var(--ink-soft,#6b7684);}
+.miniadd[disabled]:hover{background:#fff;border-color:var(--line-strong);}
 
 .detailblocks{display:flex;flex-direction:column;gap:10px;margin-bottom:16px;}
 .detailblock{
