@@ -6,6 +6,256 @@
    ============================================================ */
 var SEED = window.__NEWSLETTER_DATA__ || { allowed_platforms: [], allowed_regions: [], warnings: [], slides: [] };
 
+/* ============================================================
+   SHARED SYNC + ACCOUNTS  (JSONBin)
+   ------------------------------------------------------------
+   This block turns the single-browser tool into a shared one. All
+   entries and user accounts live in ONE JSONBin "bin" that every copy
+   of this file talks to, so 5-6 people on their own devices see the
+   same data.
+
+   Setup lives in the browser (localStorage), NOT in this code, so you
+   never edit the file: on first run the app shows a Setup screen asking
+   for a JSONBin Master Key + Bin ID and an admin password. Those config
+   values are saved per-device; the shared data lives in the bin.
+
+   SECURITY NOTE (matches what was agreed): passwords here are
+   lightweight — they gate casual access and let us stamp who added what.
+   They are NOT strong security. Anyone technical who has the file + the
+   JSONBin key could read the bin directly. Don't store secrets in it.
+   ============================================================ */
+
+var AUTH = (function(){
+  var CFG_KEY  = 'platformUpdates.cfg.v1';   // per-device: {masterKey, binId, apiBase}
+  var SESS_KEY = 'platformUpdates.sess.v1';  // per-device: {username, role, ts}
+  var API_BASE = 'https://api.jsonbin.io/v3/b';
+
+  var cfg = null;      // {masterKey, binId}
+  var session = null;  // {username, role}
+  var remote = null;   // full bin payload: {users:{}, slides:[], meta:{}}
+
+  /* ---- config persistence (this device only) ---- */
+  function loadCfg(){
+    try { cfg = JSON.parse(localStorage.getItem(CFG_KEY) || 'null'); }
+    catch(e){ cfg = null; }
+    return cfg;
+  }
+  function saveCfg(c){
+    cfg = c;
+    try { localStorage.setItem(CFG_KEY, JSON.stringify(c)); } catch(e){}
+  }
+  function clearCfg(){ cfg = null; try { localStorage.removeItem(CFG_KEY); } catch(e){} }
+  function isConfigured(){ return !!(cfg && cfg.masterKey && cfg.binId); }
+  function getImgbbKey(){ return cfg && cfg.imgbbKey ? cfg.imgbbKey : ''; }
+
+  /* Upload a base64 dataURL to ImgBB, resolve to a permanent public URL.
+     Falls back to rejecting so the caller can decide what to do. */
+  function uploadImage(dataUrl, name){
+    var key = getImgbbKey();
+    if (!key) return Promise.reject(new Error('No ImgBB key configured.'));
+    // ImgBB wants the raw base64 (no "data:...;base64," prefix).
+    var comma = dataUrl.indexOf(',');
+    var b64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+    var form = new FormData();
+    form.append('image', b64);
+    if (name) form.append('name', String(name).replace(/[^a-z0-9._-]/gi,'_').slice(0,60));
+    return fetch('https://api.imgbb.com/1/upload?key=' + encodeURIComponent(key) + '&expiration=0', {
+      method:'POST', body: form
+    }).then(function(r){
+      return r.json().then(function(j){
+        if (!r.ok || !j || !j.success || !j.data || !j.data.url){
+          throw new Error((j && j.error && j.error.message) ? j.error.message : 'upload failed ('+r.status+')');
+        }
+        return j.data.url;
+      });
+    });
+  }
+
+  /* ---- session persistence (this device only) ---- */
+  function loadSession(){
+    try { session = JSON.parse(localStorage.getItem(SESS_KEY) || 'null'); }
+    catch(e){ session = null; }
+    return session;
+  }
+  function saveSession(s){
+    session = s;
+    try { localStorage.setItem(SESS_KEY, JSON.stringify(s)); } catch(e){}
+  }
+  function clearSession(){ session = null; try { localStorage.removeItem(SESS_KEY); } catch(e){} }
+
+  /* ---- tiny hash (obfuscation only, NOT real security) ---- */
+  function hashPw(pw){
+    // FNV-1a-ish, salted. Enough to avoid storing plaintext in the bin.
+    var s = 'pu.v1.' + pw;
+    var h = 0x811c9dc5;
+    for (var i=0;i<s.length;i++){
+      h ^= s.charCodeAt(i);
+      h = (h + ((h<<1)+(h<<4)+(h<<7)+(h<<8)+(h<<24))) >>> 0;
+    }
+    return ('0000000' + h.toString(16)).slice(-8);
+  }
+
+  /* ---- remote bin I/O ---- */
+  function headers(extra){
+    var h = { 'Content-Type':'application/json', 'X-Master-Key': cfg.masterKey, 'X-Bin-Meta':'false' };
+    if (extra) for (var k in extra) h[k] = extra[k];
+    return h;
+  }
+
+  // GET latest bin. Resolves to the payload object, or null on empty/new.
+  function pull(){
+    return fetch(API_BASE + '/' + encodeURIComponent(cfg.binId) + '/latest', {
+      method:'GET', headers: headers()
+    }).then(function(r){
+      if (!r.ok) throw new Error('read failed ('+r.status+')');
+      return r.json();
+    }).then(function(data){
+      // With X-Bin-Meta:false the body IS the stored record.
+      remote = normalizeRemote(data);
+      return remote;
+    });
+  }
+
+  // PUT the whole payload back. Resolves true on success.
+  function push(payload){
+    return fetch(API_BASE + '/' + encodeURIComponent(cfg.binId), {
+      method:'PUT', headers: headers(), body: JSON.stringify(payload)
+    }).then(function(r){
+      if (!r.ok) throw new Error('write failed ('+r.status+')');
+      return r.json();
+    }).then(function(){ remote = payload; return true; });
+  }
+
+  function normalizeRemote(data){
+    var d = data && typeof data === 'object' ? data : {};
+    return {
+      users:  (d.users && typeof d.users === 'object') ? d.users : {},
+      slides: Array.isArray(d.slides) ? d.slides : [],
+      archives: Array.isArray(d.archives) ? d.archives : [],
+      meta:   (d.meta && typeof d.meta === 'object') ? d.meta : {}
+    };
+  }
+
+  function blankRemote(){ return { users:{}, slides:[], archives:[], meta:{ createdAt: Date.now() } }; }
+
+  /* ---- first-time bin bootstrap: create admin + write initial payload ---- */
+  // seedSlides lets us push the deck baked into index.html as the starting set.
+  function bootstrap(adminPw, seedSlides){
+    var payload = blankRemote();
+    payload.users['admin'] = { role:'admin', pw: hashPw(adminPw), createdAt: Date.now(), createdBy:'system' };
+    payload.slides = Array.isArray(seedSlides) ? seedSlides : [];
+    return push(payload);
+  }
+
+  /* ---- login ---- */
+  function login(username, pw){
+    username = String(username||'').trim().toLowerCase();
+    return pull().then(function(r){
+      var u = r.users[username];
+      if (!u) throw new Error('No such user.');
+      if (u.pw !== hashPw(pw)) throw new Error('Wrong password.');
+      saveSession({ username: username, role: u.role, ts: Date.now() });
+      return session;
+    });
+  }
+  function logout(){ clearSession(); }
+
+  /* ---- account management (admin) ---- */
+  function isAdmin(){ return session && session.role === 'admin'; }
+
+  function createUser(username, pw, role){
+    username = String(username||'').trim().toLowerCase();
+    if (!username) return Promise.reject(new Error('Username required.'));
+    if (!/^[a-z0-9._-]{2,32}$/.test(username)) return Promise.reject(new Error('Username: 2-32 chars, letters/numbers/._- only.'));
+    if (!pw || pw.length < 4) return Promise.reject(new Error('Password must be at least 4 characters.'));
+    return pull().then(function(r){
+      if (r.users[username]) throw new Error('That username already exists.');
+      r.users[username] = {
+        role: role === 'admin' ? 'admin' : 'member',
+        pw: hashPw(pw),
+        createdAt: Date.now(),
+        createdBy: session ? session.username : 'unknown'
+      };
+      return push(r).then(function(){ return username; });
+    });
+  }
+
+  function resetPassword(username, newPw){
+    username = String(username||'').trim().toLowerCase();
+    if (!newPw || newPw.length < 4) return Promise.reject(new Error('Password must be at least 4 characters.'));
+    return pull().then(function(r){
+      if (!r.users[username]) throw new Error('No such user.');
+      r.users[username].pw = hashPw(newPw);
+      r.users[username].pwResetAt = Date.now();
+      r.users[username].pwResetBy = session ? session.username : 'unknown';
+      return push(r).then(function(){ return username; });
+    });
+  }
+
+  function deleteUser(username){
+    username = String(username||'').trim().toLowerCase();
+    if (username === 'admin') return Promise.reject(new Error('The primary admin account cannot be deleted.'));
+    if (session && username === session.username) return Promise.reject(new Error("You can't delete the account you're logged in as."));
+    return pull().then(function(r){
+      if (!r.users[username]) throw new Error('No such user.');
+      delete r.users[username];
+      return push(r);
+    });
+  }
+
+  function setRole(username, role){
+    username = String(username||'').trim().toLowerCase();
+    if (username === 'admin' && role !== 'admin') return Promise.reject(new Error('The primary admin must stay an admin.'));
+    return pull().then(function(r){
+      if (!r.users[username]) throw new Error('No such user.');
+      r.users[username].role = role === 'admin' ? 'admin' : 'member';
+      return push(r);
+    });
+  }
+
+  function listUsers(){
+    if (!remote) return [];
+    return Object.keys(remote.users).sort().map(function(name){
+      var u = remote.users[name];
+      return { username:name, role:u.role, createdAt:u.createdAt||null, createdBy:u.createdBy||null,
+               pwResetAt:u.pwResetAt||null, pwResetBy:u.pwResetBy||null };
+    });
+  }
+
+  /* ---- shared data (slides + archives) sync ---- */
+  // Pull the shared slides/archives from the bin.
+  function pullData(){
+    return pull().then(function(r){ return { slides: r.slides, archives: r.archives }; });
+  }
+  // Write the current shared slides/archives back, preserving users/meta.
+  function pushData(slidesArr, archivesArr){
+    return pull().then(function(r){
+      r.slides = Array.isArray(slidesArr) ? slidesArr : r.slides;
+      if (Array.isArray(archivesArr)) r.archives = archivesArr;
+      return push(r);
+    });
+  }
+
+  return {
+    // config
+    loadCfg:loadCfg, saveCfg:saveCfg, clearCfg:clearCfg, isConfigured:isConfigured,
+    getCfg: function(){ return cfg; },
+    getImgbbKey:getImgbbKey, uploadImage:uploadImage,
+    // session
+    loadSession:loadSession, getSession:function(){ return session; },
+    login:login, logout:logout, isAdmin:isAdmin,
+    // bin lifecycle
+    pull:pull, bootstrap:bootstrap, blankRemote:blankRemote,
+    // accounts
+    createUser:createUser, resetPassword:resetPassword, deleteUser:deleteUser,
+    setRole:setRole, listUsers:listUsers,
+    // data
+    pullData:pullData, pushData:pushData,
+    getRemote:function(){ return remote; }
+  };
+})();
+try { window.AUTH = AUTH; } catch(e){}
+
 var ALLOWED_PLATFORMS = SEED.allowed_platforms.slice();
 var ALLOWED_REGIONS   = SEED.allowed_regions.slice();
 
@@ -91,14 +341,43 @@ function idbDelete(key){
 // Fire-and-forget save. Returns true if a write was queued, false if storage
 // is unavailable. Errors surface via setStatus but never throw to the caller.
 function saveSlides(){
-  if (!HAS_STORAGE) return false;
-  var snapshot = { savedAt: Date.now(), slides: slides };
-  _idbWriteChain = _idbWriteChain.then(function(){
-    return idbSet(IDB_KEY, snapshot);
-  }).catch(function(e){
-    setStatus('Could not save to browser storage ('+(e && e.message ? e.message : 'unknown error')+'). Your changes are live in this tab but may be lost on reload — Export as JSON to keep them.', false);
-  });
+  // Local cache (best-effort, keeps things snappy / works offline within a tab).
+  if (HAS_STORAGE){
+    var snapshot = { savedAt: Date.now(), slides: slides };
+    _idbWriteChain = _idbWriteChain.then(function(){
+      return idbSet(IDB_KEY, snapshot);
+    }).catch(function(){ /* cache miss is non-fatal; the bin is the source of truth */ });
+  }
+  // Shared write to the bin so everyone else sees the change.
+  syncPush();
   return true;
+}
+
+/* Push the current active slides + archives to the shared bin. Serialised so
+   rapid edits don't race. Surfaces success/failure via setStatus. */
+var _syncPushChain = Promise.resolve();
+var _syncPending = false;
+function syncPush(){
+  if (!(window.AUTH && AUTH.isConfigured())) return;
+  _syncPending = true;
+  _syncPushChain = _syncPushChain.then(function(){
+    if (!_syncPending) return;
+    _syncPending = false;
+    setSyncStatus('Saving to shared store…');
+    return AUTH.pushData(slides, archives).then(function(){
+      setSyncStatus('All changes saved and shared ✓', true);
+    });
+  }).catch(function(e){
+    setSyncStatus('Could not save to the shared store ('+(e && e.message ? e.message : 'network error')+'). Your change is live in this tab only until it saves.', false);
+  });
+}
+
+// Small status line dedicated to sync state (separate from the admin status).
+function setSyncStatus(msg, ok){
+  var el = document.getElementById('syncStatus');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = 'syncstatus' + (ok === true ? ' is-ok' : ok === false ? ' is-error' : '');
 }
 
 // Async load used once at startup.
@@ -129,13 +408,13 @@ var IDB_ARCHIVE_KEY = 'archives.v1';
 var archives = [];   // loaded at startup
 
 function saveArchives(){
-  if (!HAS_STORAGE) return false;
-  var snapshot = { savedAt: Date.now(), archives: archives };
-  _idbWriteChain = _idbWriteChain.then(function(){
-    return idbSet(IDB_ARCHIVE_KEY, snapshot);
-  }).catch(function(e){
-    setStatus('Could not save archives to browser storage ('+(e && e.message ? e.message : 'unknown')+'). Export as JSON to keep them.', false);
-  });
+  if (HAS_STORAGE){
+    var snapshot = { savedAt: Date.now(), archives: archives };
+    _idbWriteChain = _idbWriteChain.then(function(){
+      return idbSet(IDB_ARCHIVE_KEY, snapshot);
+    }).catch(function(){ /* local cache miss is non-fatal */ });
+  }
+  syncPush();  // archives ride along in the same shared payload
   return true;
 }
 
@@ -234,7 +513,8 @@ var NAV_META = {
   import:   { title: 'Import slides', sub: 'Bring in a PowerPoint deck or a JSON backup.' },
   export:   { title: 'Export slides', sub: 'Download the current view as PDF or JSON.' },
   archive:  { title: 'Archive', sub: 'Set aside past entries to keep the current set clean. Restore or export any batch later.' },
-  email:    { title: 'Generate email', sub: 'A leadership briefing you can preview and paste straight into your inbox.' }
+  email:    { title: 'Generate email', sub: 'A leadership briefing you can preview and paste straight into your inbox.' },
+  members:  { title: 'Members', sub: 'Create users and passwords, reset them, and manage who can access this tool.' }
 };
 
 /* ============================================================
@@ -659,6 +939,7 @@ function renderCard(s){
           + '<span class="pill">'+esc(s.region)+'</span>'
           + (s.date ? '<span class="pill">'+esc(fmtDate(s.date))+'</span>' : '')
         + '</div>'
+        + authorLine(s)
         + '<p class="card__excerpt">'+esc(excerptOf(s))+'</p>'
         + '<div class="card__row">'
           + (s.link ? '<a class="card__link" href="'+esc(s.link)+'" target="_blank" rel="noopener">Read more ↗</a>' : '<span></span>')
@@ -2162,6 +2443,7 @@ function renderWorkspace(){
   else if (state.nav === 'export') renderExportPane(wrap);
   else if (state.nav === 'archive') renderArchivePane(wrap);
   else if (state.nav === 'email')  renderEmailPane(wrap);
+  else if (state.nav === 'members') renderMembersPane(wrap);
 }
 
 /* ============================================================
@@ -2483,7 +2765,8 @@ function wireAddPane(wrap){
     });
   });
 
-  // image pickers — read as base64 dataUrl (renderer already supports this)
+  // image pickers — upload to ImgBB and store the returned URL (keeps the
+  // shared bin tiny). Falls back to inline base64 only if no ImgBB key is set.
   wrap.querySelectorAll('.detailImgInput').forEach(function(input){
     input.addEventListener('change', function(e){
       var i = parseInt(input.getAttribute('data-i'), 10);
@@ -2492,9 +2775,31 @@ function wireAddPane(wrap){
       syncDraftFromForm();
       var reader = new FileReader();
       reader.onload = function(){
-        d.body[i].dataUrl = reader.result;
-        d.body[i].file = file.name;
-        renderAddPane(wrap);
+        var dataUrl = reader.result;
+        if (AUTH.getImgbbKey()){
+          // show an uploading state
+          d.body[i].uploading = true;
+          d.body[i].file = file.name + ' — uploading…';
+          renderAddPane(wrap);
+          AUTH.uploadImage(dataUrl, file.name).then(function(url){
+            d.body[i].dataUrl = url;      // permanent public URL
+            d.body[i].file = file.name;
+            d.body[i].uploading = false;
+            setStatus('Image uploaded ✓', true);
+            renderAddPane(wrap);
+          }).catch(function(err){
+            // fall back to inline base64 so the user isn't blocked, but warn.
+            d.body[i].dataUrl = dataUrl;
+            d.body[i].file = file.name;
+            d.body[i].uploading = false;
+            setStatus('Image host upload failed ('+(err && err.message ? err.message : 'error')+'). Stored inline instead — this counts against the shared-store size limit.', false);
+            renderAddPane(wrap);
+          });
+        } else {
+          d.body[i].dataUrl = dataUrl;
+          d.body[i].file = file.name;
+          renderAddPane(wrap);
+        }
       };
       reader.readAsDataURL(file);
     });
@@ -2619,6 +2924,9 @@ function saveEntry(wrap){
   var d = state.editDraft;
 
   // validation
+  if (d.body.some(function(b){ return b.type==='image' && b.uploading; })){
+    setStatus('Hold on — an image is still uploading. Try again in a moment.', false); return;
+  }
   if (!d.title.trim()){ setStatus('Give the entry a title before saving.', false); return; }
   if (!d.region){ setStatus('Pick a region.', false); return; }
   if (d.date && !/^\d{4}-\d{2}-\d{2}$/.test(d.date)){ setStatus('Date must be a valid calendar date.', false); return; }
@@ -2651,18 +2959,30 @@ function saveEntry(wrap){
     body: body
   };
 
+  var who = (AUTH.getSession() && AUTH.getSession().username) || 'unknown';
+  var now = Date.now();
+
   if (d.id){
-    // update in place
+    // update in place — preserve original author/created stamp, add edit stamp
     var idx = slides.findIndex(function(s){ return s.id === d.id; });
     if (idx !== -1){
+      var prev = slides[idx];
       payload.id = d.id;
-      payload.slide_num = slides[idx].slide_num;
+      payload.slide_num = prev.slide_num;
+      payload.createdBy = prev.createdBy || who;
+      payload.createdAt = prev.createdAt || now;
+      payload.updatedBy = who;
+      payload.updatedAt = now;
       slides[idx] = payload;
     }
     setStatus('Saved changes to "'+payload.title+'".', true);
   } else {
     payload.id = nextId();
     payload.slide_num = nextSlideNum();
+    payload.createdBy = who;
+    payload.createdAt = now;
+    payload.updatedBy = who;
+    payload.updatedAt = now;
     slides.push(payload);
     setStatus('Added "'+payload.title+'". '+slides.length+' entries total.', true);
   }
@@ -3263,8 +3583,14 @@ function applyNavVisibility(){
   });
 }
 
+var ADMIN_ONLY_NAVS = { add:1, import:1, export:1, archive:1, email:1, members:1 };
 function setNav(nav, opts){
   opts = opts || {};
+
+  // Guard admin-only surfaces: members without admin role fall back to browse.
+  if (ADMIN_ONLY_NAVS[nav] && !(window.AUTH && AUTH.isAdmin())){
+    nav = 'browse';
+  }
 
   // "Present" is a modal overlay, not a persistent surface. Launch it over
   // whatever browse view is active, and don't change the underlying nav so
@@ -3321,19 +3647,344 @@ function initChrome(){
 
 document.addEventListener('DOMContentLoaded', function(){
   applyUrlParams();
+  AUTH.loadCfg();
+  AUTH.loadSession();
+
+  // Gate 1: first-run setup (this device has no JSONBin config yet).
+  if (!AUTH.isConfigured()){
+    renderSetupGate();
+    return;
+  }
+  // Gate 2: not logged in on this device.
+  if (!AUTH.getSession()){
+    renderLoginGate();
+    return;
+  }
+  // Logged in + configured -> boot the real app.
+  bootApp();
+});
+
+/* Boot the main application once auth + config are satisfied. Pulls the shared
+   data from the bin so this device shows what everyone else sees. */
+function bootApp(){
+  hideGate();
   document.getElementById('searchInput').value = state.search;
   initChrome();
   initPresentControls();
+  applyRoleVisibility();
 
-  // Storage is async now: open IndexedDB (and migrate any legacy localStorage
-  // data) before the first render so restored entries appear immediately.
+  // Open the local IDB cache first (fast paint), then override with the bin.
   initSlides().then(function(){
-    if (!HAS_STORAGE){
-      setStatus('Browser storage is unavailable here, so changes won\'t persist after you close this tab. Use Export as JSON to save your work.', false);
-    }
     setNav(state.nav, { silent:true });
     applyHashDeepLink();
+    // Pull authoritative shared data.
+    setSyncStatus('Loading shared updates…');
+    return AUTH.pullData();
+  }).then(function(data){
+    if (data){
+      if (Array.isArray(data.slides)) slides = data.slides;
+      if (Array.isArray(data.archives)) archives = data.archives;
+      restoredFrom = Date.now();
+      // Refresh local cache to match shared truth.
+      if (HAS_STORAGE){
+        _idbWriteChain = _idbWriteChain
+          .then(function(){ return idbSet(IDB_KEY, { savedAt:Date.now(), slides:slides }); })
+          .then(function(){ return idbSet(IDB_ARCHIVE_KEY, { savedAt:Date.now(), archives:archives }); })
+          .catch(function(){});
+      }
+      renderAll();
+      setSyncStatus('Shared updates loaded ✓', true);
+    }
+  }).catch(function(e){
+    setSyncStatus('Could not load shared updates ('+(e && e.message ? e.message : 'network error')+'). Showing this device\'s last cached copy.', false);
   });
-});
+}
+
+/* ============================================================
+   AUTHORSHIP DISPLAY
+   ============================================================ */
+function fmtStamp(ts){
+  if (!ts) return '';
+  try {
+    return new Date(ts).toLocaleString('en-GB', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+  } catch(e){ return ''; }
+}
+function authorLine(s){
+  var bits = [];
+  if (s.createdBy) bits.push('Added by <strong>'+esc(s.createdBy)+'</strong>' + (s.createdAt ? ' · '+esc(fmtStamp(s.createdAt)) : ''));
+  if (s.updatedAt && s.createdAt && s.updatedAt !== s.createdAt){
+    bits.push('edited by <strong>'+esc(s.updatedBy||'?')+'</strong> · '+esc(fmtStamp(s.updatedAt)));
+  }
+  if (!bits.length) return '';
+  return '<div class="card__author">'+bits.join(' &nbsp;•&nbsp; ')+'</div>';
+}
+
+/* ============================================================
+   AUTH GATES  (setup / login) and role-based chrome
+   ============================================================ */
+function ensureGateEl(){
+  var g = document.getElementById('authGate');
+  if (!g){
+    g = document.createElement('div');
+    g.id = 'authGate';
+    g.className = 'authgate';
+    document.body.appendChild(g);
+  }
+  return g;
+}
+function hideGate(){
+  var g = document.getElementById('authGate');
+  if (g) g.remove();
+  var shell = document.querySelector('.shell');
+  if (shell) shell.style.display = '';
+}
+function showGate(html){
+  var shell = document.querySelector('.shell');
+  if (shell) shell.style.display = 'none';
+  var overlay = document.getElementById('presentOverlay');
+  if (overlay) overlay.hidden = true;
+  var g = ensureGateEl();
+  g.innerHTML = html;
+  return g;
+}
+
+/* ---- First-run setup: capture JSONBin config + admin password ---- */
+function renderSetupGate(){
+  var existing = AUTH.getCfg() || {};
+  var g = showGate(
+    '<div class="authcard">'
+      + '<h1 class="authcard__title">Set up shared sync</h1>'
+      + '<p class="authcard__lead">This connects the tool to a shared store so everyone on the team sees the same entries. You only do this once per device. Get a free key + bin at <strong>jsonbin.io</strong>.</p>'
+      + '<div class="authcard__steps">'
+        + '<p><strong>How to get these (2 minutes):</strong></p>'
+        + '<ol>'
+          + '<li>Sign up free at jsonbin.io.</li>'
+          + '<li>Open <em>API Keys</em> → copy your <em>Master Key</em>.</li>'
+          + '<li>Click <em>Create Bin</em>, paste <code>{}</code>, save it, and copy the <em>Bin ID</em> from the URL.</li>'
+          + '<li>Share the same Master Key + Bin ID with the other 5-6 people so everyone syncs to the same bin.</li>'
+        + '</ol>'
+      + '</div>'
+      + '<label class="authfield">Master Key<input type="password" id="setupKey" value="'+esc(existing.masterKey||'')+'" placeholder="$2a$10$…" autocomplete="off"></label>'
+      + '<label class="authfield">Bin ID<input type="text" id="setupBin" value="'+esc(existing.binId||'')+'" placeholder="6xxxxxxxxxxxxxxxxxxx" autocomplete="off"></label>'
+      + '<label class="authfield">ImgBB API key <span class="authfield__opt">(for image entries)</span><input type="password" id="setupImgbb" value="'+esc(existing.imgbbKey||'')+'" placeholder="paste your ImgBB key" autocomplete="off"></label>'
+      + '<p class="authcard__note">Images in entries are uploaded to ImgBB so the shared store stays small. Get a free key at <strong>api.imgbb.com</strong>. Leave blank to store images inline instead (fine for text-only teams; not recommended if you add screenshots). Note: ImgBB images are public links.</p>'
+      + '<div class="authcard__adminwrap" id="adminSetupWrap">'
+        + '<p class="authcard__note">If this is a brand-new (empty) bin, set the first admin password. If the bin was already set up by a teammate, leave this blank and just Connect.</p>'
+        + '<label class="authfield">Admin password <span class="authfield__opt">(new bin only)</span><input type="password" id="setupAdminPw" placeholder="choose an admin password" autocomplete="new-password"></label>'
+      + '</div>'
+      + '<div class="authcard__msg" id="setupMsg"></div>'
+      + '<button type="button" class="btn authcard__btn" id="setupConnect">Connect</button>'
+    + '</div>'
+  );
+
+  function msg(t, ok){
+    var m = g.querySelector('#setupMsg');
+    m.textContent = t; m.className = 'authcard__msg' + (ok===true?' is-ok':ok===false?' is-error':'');
+  }
+
+  g.querySelector('#setupConnect').addEventListener('click', function(){
+    var key = g.querySelector('#setupKey').value.trim();
+    var bin = g.querySelector('#setupBin').value.trim();
+    var imgbb = g.querySelector('#setupImgbb').value.trim();
+    var adminPw = g.querySelector('#setupAdminPw').value;
+    if (!key || !bin){ msg('Enter both the Master Key and Bin ID.', false); return; }
+    var btn = g.querySelector('#setupConnect'); btn.disabled = true; msg('Connecting…');
+
+    AUTH.saveCfg({ masterKey:key, binId:bin, imgbbKey:imgbb });
+    // Read the bin to see whether it's already set up.
+    AUTH.pull().then(function(r){
+      var hasUsers = r && r.users && Object.keys(r.users).length > 0;
+      if (hasUsers){
+        // Existing bin — no bootstrap needed, go to login.
+        msg('Connected to existing shared store ✓', true);
+        setTimeout(renderLoginGate, 500);
+        return;
+      }
+      // Empty / fresh bin — need an admin password to bootstrap.
+      if (!adminPw || adminPw.length < 4){
+        AUTH.clearCfg();
+        btn.disabled = false;
+        msg('This looks like a new bin. Set an admin password (4+ chars) to initialise it.', false);
+        return;
+      }
+      var seed = (window.__NEWSLETTER_DATA__ && Array.isArray(window.__NEWSLETTER_DATA__.slides))
+                 ? window.__NEWSLETTER_DATA__.slides.slice() : [];
+      return AUTH.bootstrap(adminPw, seed).then(function(){
+        msg('Shared store initialised. Admin account created ✓', true);
+        setTimeout(renderLoginGate, 600);
+      });
+    }).catch(function(e){
+      AUTH.clearCfg();
+      btn.disabled = false;
+      msg('Could not connect: '+(e && e.message ? e.message : 'check your key and bin ID')+'.', false);
+    });
+  });
+}
+
+/* ---- Login ---- */
+function renderLoginGate(){
+  var cfg = AUTH.getCfg();
+  var g = showGate(
+    '<div class="authcard">'
+      + '<h1 class="authcard__title">Platform Updates</h1>'
+      + '<p class="authcard__lead">Sign in to view and add updates.</p>'
+      + '<label class="authfield">Username<input type="text" id="loginUser" autocomplete="username" placeholder="username"></label>'
+      + '<label class="authfield">Password<input type="password" id="loginPw" autocomplete="current-password" placeholder="password"></label>'
+      + '<div class="authcard__msg" id="loginMsg"></div>'
+      + '<button type="button" class="btn authcard__btn" id="loginBtn">Sign in</button>'
+      + '<button type="button" class="authlink" id="reconfigBtn">Change shared-store settings</button>'
+    + '</div>'
+  );
+
+  function msg(t, ok){
+    var m = g.querySelector('#loginMsg');
+    m.textContent = t; m.className = 'authcard__msg' + (ok===true?' is-ok':ok===false?' is-error':'');
+  }
+  function doLogin(){
+    var u = g.querySelector('#loginUser').value;
+    var p = g.querySelector('#loginPw').value;
+    if (!u || !p){ msg('Enter your username and password.', false); return; }
+    var btn = g.querySelector('#loginBtn'); btn.disabled = true; msg('Signing in…');
+    AUTH.login(u, p).then(function(){
+      bootApp();
+    }).catch(function(e){
+      btn.disabled = false;
+      msg(e && e.message ? e.message : 'Sign in failed.', false);
+    });
+  }
+  g.querySelector('#loginBtn').addEventListener('click', doLogin);
+  g.querySelector('#loginPw').addEventListener('keydown', function(e){ if (e.key === 'Enter') doLogin(); });
+  g.querySelector('#reconfigBtn').addEventListener('click', function(){
+    if (confirm('This will forget the shared-store settings ON THIS DEVICE only (the shared data itself is not touched). You will need the Master Key and Bin ID to reconnect. Continue?')){
+      AUTH.clearCfg(); AUTH.logout(); renderSetupGate();
+    }
+  });
+  setTimeout(function(){ var el = g.querySelector('#loginUser'); if (el) el.focus(); }, 50);
+}
+
+/* ---- Role-based chrome: hide admin-only nav from members, show who's in ---- */
+function applyRoleVisibility(){
+  var admin = AUTH.isAdmin();
+  var adminNav = document.getElementById('adminNav');
+  if (adminNav) adminNav.style.display = admin ? '' : 'none';
+
+  // Members tab lives in the admin nav group; ensure a nav button exists.
+  var membersBtn = document.querySelector('.nav__item[data-nav="members"]');
+  if (admin && membersBtn) membersBtn.style.display = '';
+
+  // Session bar (who am I + logout) in the sidebar footer.
+  var foot = document.querySelector('.sidebar__foot');
+  if (foot){
+    var sess = AUTH.getSession();
+    foot.innerHTML =
+      '<div class="sessionbar">'
+        + '<div class="sessionbar__who">Signed in as <strong>'+esc(sess ? sess.username : '?')+'</strong>'
+          + '<span class="sessionbar__role">'+(admin ? 'admin' : 'member')+'</span></div>'
+        + '<button type="button" class="authlink authlink--out" id="logoutBtn">Sign out</button>'
+      + '</div>'
+      + '<div class="syncstatus" id="syncStatus"></div>';
+    var lo = foot.querySelector('#logoutBtn');
+    if (lo) lo.addEventListener('click', function(){ AUTH.logout(); renderLoginGate(); });
+  }
+}
+
+/* ============================================================
+   MEMBERS PANE  (admin only): create users, reset passwords,
+   change roles, remove users.
+   ============================================================ */
+function renderMembersPane(wrap){
+  if (!AUTH.isAdmin()){
+    wrap.innerHTML = '<div class="panel"><p class="panel__hint">This section is for admins only.</p></div>';
+    return;
+  }
+
+  function draw(users){
+    wrap.innerHTML =
+      '<div class="panel">'
+        + '<div class="panel__head"><h2 class="panel__title">Create a user</h2></div>'
+        + '<p class="panel__hint">Create a username and password, then share those credentials with the person. They sign in on their own device and can add entries; everything they add is stamped with their name and the time. Passwords here are lightweight — fine for tracking who did what, not for protecting secrets.</p>'
+        + '<div class="memberform">'
+          + '<label class="authfield">Username<input type="text" id="newUser" placeholder="e.g. maria"></label>'
+          + '<label class="authfield">Password<input type="text" id="newPw" placeholder="give them a starter password"></label>'
+          + '<label class="authfield">Role<select id="newRole"><option value="member">Member</option><option value="admin">Admin</option></select></label>'
+          + '<button type="button" class="btn" id="createUserBtn">Create user</button>'
+        + '</div>'
+        + '<div class="authcard__msg" id="memberMsg"></div>'
+      + '</div>'
+      + '<div class="panel">'
+        + '<div class="panel__head"><h2 class="panel__title">People ('+users.length+')</h2></div>'
+        + '<p class="panel__hint">Reset a password if someone forgets theirs (share the new one with them), change a role, or remove access.</p>'
+        + '<div class="memberlist">'
+          + (users.length ? users.map(memberRow).join('') : '<p class="panel__hint">No users yet.</p>')
+        + '</div>'
+      + '</div>';
+
+    var msgEl = wrap.querySelector('#memberMsg');
+    function msg(t, ok){ msgEl.textContent = t; msgEl.className = 'authcard__msg' + (ok===true?' is-ok':ok===false?' is-error':''); }
+
+    wrap.querySelector('#createUserBtn').addEventListener('click', function(){
+      var u = wrap.querySelector('#newUser').value;
+      var p = wrap.querySelector('#newPw').value;
+      var role = wrap.querySelector('#newRole').value;
+      msg('Creating…');
+      AUTH.createUser(u, p, role).then(function(name){
+        msg('Created "'+name+'". Share these credentials — username: '+name+', password: '+p, true);
+        refresh();
+      }).catch(function(e){ msg(e.message || 'Could not create user.', false); });
+    });
+
+    wrap.querySelectorAll('.memberrow').forEach(function(row){
+      var name = row.getAttribute('data-user');
+      var r = row.querySelector('.memberrow__reset');
+      var d = row.querySelector('.memberrow__del');
+      var roleSel = row.querySelector('.memberrow__role');
+      if (r) r.addEventListener('click', function(){
+        var np = prompt('New password for "'+name+'":');
+        if (np == null) return;
+        AUTH.resetPassword(name, np).then(function(){
+          msg('Password reset for "'+name+'". New password: '+np+' — share it with them.', true);
+        }).catch(function(e){ msg(e.message || 'Reset failed.', false); });
+      });
+      if (d) d.addEventListener('click', function(){
+        if (!confirm('Remove "'+name+'"? They will no longer be able to sign in. Entries they already added stay in place.')) return;
+        AUTH.deleteUser(name).then(function(){ msg('Removed "'+name+'".', true); refresh(); })
+          .catch(function(e){ msg(e.message || 'Could not remove.', false); });
+      });
+      if (roleSel) roleSel.addEventListener('change', function(){
+        AUTH.setRole(name, roleSel.value).then(function(){ msg('Updated role for "'+name+'".', true); refresh(); })
+          .catch(function(e){ msg(e.message || 'Could not update role.', false); refresh(); });
+      });
+    });
+  }
+
+  function memberRow(u){
+    var meta = [];
+    if (u.createdAt) meta.push('created '+esc(fmtStamp(u.createdAt)) + (u.createdBy ? ' by '+esc(u.createdBy) : ''));
+    if (u.pwResetAt) meta.push('pw reset '+esc(fmtStamp(u.pwResetAt)));
+    var isPrimary = u.username === 'admin';
+    return '<div class="memberrow" data-user="'+esc(u.username)+'">'
+      + '<div class="memberrow__main">'
+        + '<span class="memberrow__name">'+esc(u.username)+'</span>'
+        + '<select class="memberrow__role"'+(isPrimary?' disabled':'')+'>'
+          + '<option value="member"'+(u.role==='member'?' selected':'')+'>Member</option>'
+          + '<option value="admin"'+(u.role==='admin'?' selected':'')+'>Admin</option>'
+        + '</select>'
+      + '</div>'
+      + '<div class="memberrow__meta">'+meta.join(' · ')+'</div>'
+      + '<div class="memberrow__actions">'
+        + '<button type="button" class="btn btn--ghost memberrow__reset">Reset password</button>'
+        + (isPrimary ? '' : '<button type="button" class="btn btn--danger memberrow__del">Remove</button>')
+      + '</div>'
+    + '</div>';
+  }
+
+  function refresh(){
+    AUTH.pull().then(function(){ draw(AUTH.listUsers()); })
+      .catch(function(){ wrap.innerHTML = '<div class="panel"><p class="panel__hint">Could not load the user list — network error.</p></div>'; });
+  }
+
+  wrap.innerHTML = '<div class="panel"><p class="panel__hint">Loading users…</p></div>';
+  refresh();
+}
 
 })();
