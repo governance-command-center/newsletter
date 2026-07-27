@@ -124,11 +124,11 @@ button{font-family:inherit;}
   box-shadow:inset 3px 0 0 var(--accent) ;
 }
 .nav__ico{
-  width:20px;flex:none;text-align:center;
-  font-size:14px;
-  color:var(--sidebar-muted);
+  width:22px;flex:none;text-align:center;
+  font-size:16px;
+  line-height:1;
+  /* emoji glyphs render in their own colours; no colour override */
 }
-.nav__item.is-active .nav__ico{color:#8fbaf6;}
 
 .sidebar__foot{
   margin-top:auto;
@@ -801,6 +801,13 @@ input[type="file"]{display:none;}
 .present__content .card__imgnote{
   background:rgba(255,255,255,.06);border-radius:8px;padding:12px;color:#9fb4d6;font-size:.85em;
 }
+/* pasted tables (inside .rich) on the dark presentation background */
+.present__content .rich table{background:rgba(255,255,255,.04);border-radius:8px;overflow:hidden;}
+.present__content .rich table td,.present__content .rich table th{
+  border:1px solid rgba(255,255,255,.12);color:#dbe6f6;
+}
+.present__content .rich table th{background:rgba(255,255,255,.09);color:#fff;font-weight:600;}
+.present__content .rich table tr:first-child td{background:rgba(255,255,255,.09);color:#fff;font-weight:600;}
 .present__progress{
   display:flex;gap:4px;padding:14px 26px 20px;flex:none;overflow-x:auto;
 }
@@ -859,6 +866,30 @@ input[type="file"]{display:none;}
 .card__full .rich h4,.present__content .rich h4{margin-top:10px;}
 .rich :first-child{margin-top:0;}
 .rich :last-child{margin-bottom:0;}
+
+/* Pasted tables live inside a rich block. Keep them inside the column width:
+   fixed layout distributes columns evenly and long cell text wraps instead of
+   pushing the table past the edge of the screen. */
+.rtb__editor table,
+.rich table{
+  width:100%;
+  max-width:100%;
+  table-layout:fixed;
+  border-collapse:collapse;
+  margin:10px 0;
+  font-size:.92em;
+}
+.rtb__editor table td,.rtb__editor table th,
+.rich table td,.rich table th{
+  border:1px solid var(--line);
+  padding:6px 9px;
+  text-align:left;
+  vertical-align:top;
+  overflow-wrap:anywhere;
+  word-break:break-word;
+}
+/* editor surface: give the whole editable area a horizontal safety net too */
+.rtb__editor{overflow-x:auto;}
 
 /* ============================================================
    ARCHIVE

@@ -520,7 +520,8 @@ function renderBody(body, forPrint){
    Everything else is unwrapped (keeping its text) or dropped. No <script>,
    <style>, event handlers, or javascript: URLs can get through.
    ------------------------------------------------------------------ */
-var RICH_ALLOWED_TAGS = { B:1,STRONG:1,I:1,EM:1,U:1,H4:1,H5:1,UL:1,OL:1,LI:1,P:1,BR:1,A:1,SPAN:1,DIV:1 };
+var RICH_ALLOWED_TAGS = { B:1,STRONG:1,I:1,EM:1,U:1,H4:1,H5:1,UL:1,OL:1,LI:1,P:1,BR:1,A:1,SPAN:1,DIV:1,
+  TABLE:1,THEAD:1,TBODY:1,TFOOT:1,TR:1,TD:1,TH:1 };
 var RICH_ALLOWED_STYLES = { 'color':1, 'font-size':1, 'font-weight':1, 'text-decoration':1 };
 
 function sanitizeRichHtml(html){
@@ -559,6 +560,9 @@ function sanitizeRichHtml(html){
         } else if (name === 'style'){
           var cleaned = cleanInlineStyle(attr.value);
           if (cleaned) child.setAttribute('style', cleaned); else child.removeAttribute('style');
+        } else if ((name === 'colspan' || name === 'rowspan') && (tag === 'TD' || tag === 'TH')){
+          // keep simple numeric spans on pasted table cells
+          if (!/^\d+$/.test(attr.value.trim())) child.removeAttribute(attr.name);
         } else {
           child.removeAttribute(attr.name);
         }
@@ -574,6 +578,28 @@ function sanitizeRichHtml(html){
   return root.innerHTML;
 }
 
+// Detect black / near-black colours that pasted content (Word, Google Docs,
+// web pages) commonly injects as an explicit color. We drop these so the text
+// inherits the theme colour instead — dark ink on the browse views, light on
+// the dark presentation background — keeping everything "in line" with the
+// surrounding text. Deliberately chosen colours (blue, red, etc.) are kept.
+function isDefaultBlack(val){
+  var v = String(val).trim().toLowerCase().replace(/\s+/g,'');
+  if (v === 'black' || v === '#000' || v === '#000000') return true;
+  var m = v.match(/^rgba?\((\d+),(\d+),(\d+)(?:,([\d.]+))?\)$/);
+  if (m){
+    var r = +m[1], g = +m[2], b = +m[3];
+    // treat very dark greys as "black" too (Word often uses rgb(0,0,0)..(51,51,51))
+    if (r <= 51 && g <= 51 && b <= 51) return true;
+  }
+  var hx = v.match(/^#([0-9a-f]{6})$/);
+  if (hx){
+    var n = parseInt(hx[1],16);
+    if (((n>>16)&255) <= 51 && ((n>>8)&255) <= 51 && (n&255) <= 51) return true;
+  }
+  return false;
+}
+
 function cleanInlineStyle(style){
   var out = [];
   String(style).split(';').forEach(function(decl){
@@ -583,6 +609,8 @@ function cleanInlineStyle(style){
     var val = decl.slice(idx+1).trim();
     if (!RICH_ALLOWED_STYLES[prop]) return;
     if (/url\s*\(|expression|javascript:/i.test(val)) return; // no image/script tricks
+    // drop default black text colour so it inherits the theme colour
+    if (prop === 'color' && isDefaultBlack(val)) return;
     out.push(prop + ':' + val);
   });
   return out.join(';');
@@ -2257,7 +2285,7 @@ function renderAddPane(wrap){
 
   var blocksHtml = d.body.length
     ? d.body.map(detailBlockHtml).join('')
-    : '<div class="detailblock__empty" style="padding:14px;text-align:center;">No details yet — add a text block, image or table below.</div>';
+    : '<div class="detailblock__empty" style="padding:14px;text-align:center;">No details yet — add a text block or image below. You can paste tables directly into a text block.</div>';
 
   // Existing entries list (edit/delete + select-to-archive)
   var listRows = slides.slice().sort(function(a,b){
@@ -2279,7 +2307,7 @@ function renderAddPane(wrap){
   wrap.innerHTML =
     '<div class="panel">'
       + '<div class="panel__head"><h2 class="panel__title">'+(editing?'Edit entry':'Add a new entry')+'</h2></div>'
-      + '<p class="panel__hint">Fill in the update below. <strong>Details</strong> is a rich-text editor — type freely, then select text and use the toolbar for <strong>bold</strong>, italic, headers, bullet lists, font size, colour and links. Add separate blocks for images and tables. Everything flows into the browse views, presentation, email summary and PDF export.</p>'
+      + '<p class="panel__hint">Fill in the update below. <strong>Details</strong> is a rich-text editor — type freely, then select text and use the toolbar for <strong>bold</strong>, italic, headers, bullet lists, font size, colour and links. You can also <strong>paste a table</strong> straight into a text block and it will fit the width automatically. Add image blocks for pictures (up to 2). Everything flows into the browse views, presentation, email summary and PDF export.</p>'
 
       + '<div class="formgrid">'
         + '<div class="formfield"><label>Platform</label><select id="fPlatform">'+optionsHtml(ALLOWED_PLATFORMS, d.platform)+'</select></div>'
@@ -2294,8 +2322,9 @@ function renderAddPane(wrap){
         + '<span class="detailhead__title">Details</span>'
         + '<div class="detailhead__actions">'
           + '<button type="button" class="miniadd" data-add="rich">+ Text block</button>'
-          + '<button type="button" class="miniadd" data-add="image">+ Image</button>'
-          + '<button type="button" class="miniadd" data-add="table">+ Table</button>'
+          + '<button type="button" class="miniadd" data-add="image"'
+            + (d.body.filter(function(b){ return b.type==='image'; }).length >= 2 ? ' disabled title="Maximum of 2 images reached"' : '')
+            + '>+ Image</button>'
         + '</div>'
       + '</div>'
       + '<div class="detailblocks" id="detailBlocks">'+blocksHtml+'</div>'
@@ -2366,7 +2395,14 @@ function wireAddPane(wrap){
     btn.addEventListener('click', function(){
       syncDraftFromForm();
       var kind = btn.getAttribute('data-add');
-      if (kind === 'image') d.body.push({ type:'image', file:'', dataUrl:null });
+      if (kind === 'image'){
+        var imgCount = d.body.filter(function(b){ return b.type === 'image'; }).length;
+        if (imgCount >= 2){
+          setStatus('You can add a maximum of 2 images per entry.', false);
+          return;
+        }
+        d.body.push({ type:'image', file:'', dataUrl:null });
+      }
       else if (kind === 'table') d.body.push({ type:'table', rows:[['',''],['','']] });
       else d.body.push({ type:'rich', html:'' });
       renderAddPane(wrap);
