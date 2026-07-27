@@ -553,12 +553,21 @@ input[type="file"]{display:none;}
 .pdf-card table{border-collapse:collapse;width:100%;margin:6px 0;font-size:10.5px;}
 .pdf-card th,.pdf-card td{border:1px solid #ccc;padding:4px 6px;text-align:left;}
 .pdf-card img{max-width:100%;margin:6px 0;border:1px solid #ccc;}
-.pdf-card__link{font-size:10.5px;color:#555;word-break:break-all;}
+.pdf-card__link{font-size:11px;margin-top:4px;}
+.pdf-card__link a{color:var(--accent);font-weight:600;text-decoration:none;}
 
 @media print{
   body > *:not(#printArea){display:none !important;}
   #printArea{display:block !important;}
-  @page{margin:16mm 14mm;}
+  /* Blank out the browser's auto-generated print header/footer (page URL such as
+     ...github.io/newsletter/, the date/time stamp, and the page number). These
+     are drawn by the browser's print engine, not the document, so they are
+     suppressed here by emptying the @page margin boxes. */
+  @page{
+    margin:16mm 14mm;
+    @top-left{content:"";} @top-center{content:"";} @top-right{content:"";}
+    @bottom-left{content:"";} @bottom-center{content:"";} @bottom-right{content:"";}
+  }
 }
 
 /* ---- Manage slides (delete) ---- */

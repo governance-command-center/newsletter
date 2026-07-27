@@ -1421,7 +1421,7 @@ function buildPrintDoc(list, titleLabel){
         + '<h3 class="pdf-card__title">'+esc(s.title)+'</h3>'
         + '<div class="pdf-card__meta">'+esc(s.platform)+' · '+esc(s.region)+(s.date ? ' · '+esc(fmtDate(s.date)) : '')+'</div>'
         + renderBody(s.body, true)
-        + (s.link ? '<div class="pdf-card__link">'+esc(s.link)+'</div>' : '')
+        + (s.link ? '<div class="pdf-card__link"><a href="'+esc(s.link)+'">Read more \u2197</a></div>' : '')
       + '</div>';
     });
     html += '</div>';
@@ -1831,18 +1831,21 @@ function platformBadge(platform, size){
 
   return ''
     // ---- Outlook only: VML rounded rectangle ----
-    // Vertical centering here is done purely by line-height == box height (the
-    // reliable Outlook trick). We deliberately do NOT combine it with
-    // v-text-anchor:middle, because stacking the two centering mechanisms is what
-    // threw the letters out of / to the top of the square in earlier versions.
+    // The text lives inside a <v:textbox> and is vertically centered with
+    // v-text-anchor:middle on the shape. This is the documented, reliable way to
+    // put centered text in a VML shape in Word/Outlook. The earlier version used
+    // <w:anchorlock/> + <center>, which Outlook silently dropped — that is why the
+    // three letters (LZD / SHP / TTS / ZLR) were missing from the badges when the
+    // email was pasted into Outlook, leaving only the coloured square.
     + '<!--[if mso]>'
       + '<v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" '
-        + 'style="width:' + size + 'px;height:' + size + 'px;mso-fit-shape-to-text:f;" '
+        + 'style="width:' + size + 'px;height:' + size + 'px;v-text-anchor:middle;mso-fit-shape-to-text:f;" '
         + 'arcsize="' + Math.round(arc * 100) + '%" stroke="f" fillcolor="' + bg + '">'
-        + '<w:anchorlock/>'
-        + '<center style="color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:' + fontPx + 'px;font-weight:bold;mso-line-height-rule:exactly;line-height:' + size + 'px;text-align:center;">'
-          + '<span style="color:#ffffff;">' + esc(code) + '</span>'
-        + '</center>'
+        + '<v:textbox inset="0,0,0,0" style="mso-fit-shape-to-text:f;">'
+          + '<center style="color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:' + fontPx + 'px;font-weight:bold;mso-line-height-rule:exactly;line-height:1;text-align:center;">'
+            + '<span style="color:#ffffff;">' + esc(code) + '</span>'
+          + '</center>'
+        + '</v:textbox>'
       + '</v:roundrect>'
     + '<![endif]-->'
 
