@@ -3031,19 +3031,44 @@ function saveEntry(wrap){
    or on-screen controls. The breadcrumb shows where you are in the
    date → region → platform hierarchy.
    ============================================================ */
+
+// Every slide needs to land in *some* publish-date group, even if it was
+// never given an exact ISO date (e.g. entries typed in with only a
+// "Jun 29 – Jul 3" style label, or pulled in via import before a date was
+// confirmed). Falling back to date_range — and finally to an explicit
+// "Undated" bucket — means the dropdown always accounts for every slide,
+// instead of silently dropping undated ones once a specific date is chosen.
+function presentDateKey(s){
+  if (s.date) return 'd:' + s.date;
+  if (s.date_range) return 'r:' + s.date_range;
+  return '__undated__';
+}
+function presentDateLabel(s){
+  if (s.date) return fmtDate(s.date);
+  if (s.date_range) return s.date_range;
+  return 'Undated';
+}
+
 function buildPresentOrder(){
   var list = filteredSlides().slice();
   // Narrow to a single publish date when one is chosen in the present bar.
   var df = state.present.dateFilter;
   if (df && df !== '__all__'){
-    list = list.filter(function(s){ return (s.date || '') === df; });
+    list = list.filter(function(s){ return presentDateKey(s) === df; });
   }
   var regionRank = function(r){ var i = ALLOWED_REGIONS.indexOf(r); return i === -1 ? 999 : i; };
   var platRank = function(p){ var i = ALLOWED_PLATFORMS.indexOf(p); return i === -1 ? 999 : i; };
   list.sort(function(a,b){
-    // date: newest first; entries without a date sink to the bottom
-    var da = a.date || '', db = b.date || '';
-    if (da !== db){ if (!da) return 1; if (!db) return -1; return db.localeCompare(da); }
+    // date: newest first; entries without an exact date sink to the bottom,
+    // grouped by their date_range (or "Undated") instead of scattering.
+    var ka = presentDateKey(a), kb = presentDateKey(b);
+    if (ka !== kb){
+      var da = a.date || '', db = b.date || '';
+      if (!da && !db) return presentDateLabel(a).localeCompare(presentDateLabel(b));
+      if (!da) return 1;
+      if (!db) return -1;
+      return db.localeCompare(da);
+    }
     var rr = regionRank(a.region) - regionRank(b.region);
     if (rr !== 0) return rr;
     return platRank(a.platform) - platRank(b.platform);
@@ -3051,22 +3076,38 @@ function buildPresentOrder(){
   return list;
 }
 
-// Build the "Publish date" dropdown in the present bar from the publish dates
-// present in the current filtered set. Keeps the current selection if it still
-// exists, otherwise falls back to "All dates".
+// Build the "Publish date" dropdown in the present bar from the publish-date
+// groups present in the current filtered set — grouping every slide (even
+// undated ones) under its effective publish date so none get dropped when a
+// specific date is chosen. Keeps the current selection if it still exists,
+// otherwise falls back to "All dates".
 function populatePresentDates(){
   var sel = document.getElementById('presentDateSelect');
   if (!sel) return;
-  var seen = {};
-  filteredSlides().forEach(function(s){ if (s.date) seen[s.date] = true; });
-  var dates = Object.keys(seen).sort().reverse(); // newest first
-  if (state.present.dateFilter !== '__all__' && !seen[state.present.dateFilter]){
+  var all = filteredSlides();
+  var groups = {}; // key -> { label, sortDate, count }
+  all.forEach(function(s){
+    var key = presentDateKey(s);
+    if (!groups[key]) groups[key] = { label: presentDateLabel(s), sortDate: s.date || '', count: 0 };
+    groups[key].count++;
+  });
+  var keys = Object.keys(groups).sort(function(ka, kb){
+    var ga = groups[ka], gb = groups[kb];
+    // dated groups first (newest first), then undated/labelled groups by label
+    if (ga.sortDate !== gb.sortDate){
+      if (!ga.sortDate) return 1;
+      if (!gb.sortDate) return -1;
+      return gb.sortDate.localeCompare(ga.sortDate);
+    }
+    return ga.label.localeCompare(gb.label);
+  });
+  if (state.present.dateFilter !== '__all__' && !groups[state.present.dateFilter]){
     state.present.dateFilter = '__all__';
   }
-  var opts = '<option value="__all__">All dates ('+filteredSlides().length+')</option>';
-  opts += dates.map(function(d){
-    var n = filteredSlides().filter(function(s){ return (s.date||'') === d; }).length;
-    return '<option value="'+esc(d)+'"'+(state.present.dateFilter===d?' selected':'')+'>'+esc(fmtDate(d))+' ('+n+')</option>';
+  var opts = '<option value="__all__">All dates ('+all.length+')</option>';
+  opts += keys.map(function(k){
+    var g = groups[k];
+    return '<option value="'+esc(k)+'"'+(state.present.dateFilter===k?' selected':'')+'>'+esc(g.label)+' ('+g.count+')</option>';
   }).join('');
   sel.innerHTML = opts;
   sel.value = state.present.dateFilter;
@@ -3143,7 +3184,7 @@ function renderPresent(){
 
   // progress dots — mark where a new date begins
   progress.innerHTML = list.map(function(item, idx){
-    var newDate = idx === 0 || (list[idx-1].date || '') !== (item.date || '');
+    var newDate = idx === 0 || presentDateKey(list[idx-1]) !== presentDateKey(item);
     return '<div class="present__dot'+(idx===i?' is-active':'')+(newDate?' is-newdate':'')+'" data-i="'+idx+'" title="'+esc(item.title)+'"></div>';
   }).join('');
   progress.querySelectorAll('.present__dot').forEach(function(dot){
