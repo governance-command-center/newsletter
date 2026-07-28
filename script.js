@@ -1829,12 +1829,35 @@ function buildPrintDoc(list, titleLabel){
     // stays on page 1 right under the document header (no leading blank page).
     var groupClass = 'pdf-group' + (gi === 0 ? ' pdf-group--first' : '');
     html += '<div class="'+groupClass+'"><h2 class="pdf-group__title">'+esc(k)+'</h2>';
+    var byRegion = state.view === 'region';
     g.groups[k].forEach(function(s){
+      // In a region group, k is the region for this card → show that region and
+      // its link. Otherwise list every region and every region-specific link.
+      var regs = entryRegions(s);
+      var links = entryLinks(s);
+      var metaRegion = byRegion ? k : (regs.join(', ') || s.region || '');
+
+      var linkHtml = '';
+      if (byRegion){
+        var one = links[k] || entryPrimaryLink(s);
+        if (one) linkHtml = '<div class="pdf-card__link"><a href="'+esc(one)+'">Read more \u2197</a><div class="pdf-card__url">'+esc(one)+'</div></div>';
+      } else {
+        var linkedRegs = regs.filter(function(r){ return links[r]; });
+        if (linkedRegs.length > 1){
+          linkHtml = linkedRegs.map(function(r){
+            return '<div class="pdf-card__link"><a href="'+esc(links[r])+'">'+esc(r)+': Read more \u2197</a><div class="pdf-card__url">'+esc(links[r])+'</div></div>';
+          }).join('');
+        } else {
+          var only = entryPrimaryLink(s);
+          if (only) linkHtml = '<div class="pdf-card__link"><a href="'+esc(only)+'">Read more \u2197</a><div class="pdf-card__url">'+esc(only)+'</div></div>';
+        }
+      }
+
       html += '<div class="pdf-card">'
         + '<h3 class="pdf-card__title">'+esc(s.title)+'</h3>'
-        + '<div class="pdf-card__meta">'+esc(s.platform)+' · '+esc(s.region)+(s.date ? ' · '+esc(fmtDate(s.date)) : '')+'</div>'
+        + '<div class="pdf-card__meta">'+esc(s.platform)+' · '+esc(metaRegion)+(s.date ? ' · '+esc(fmtDate(s.date)) : '')+'</div>'
         + renderBody(s.body, true)
-        + (s.link ? '<div class="pdf-card__link"><a href="'+esc(s.link)+'">Read more \u2197</a><div class="pdf-card__url">'+esc(s.link)+'</div></div>' : '')
+        + linkHtml
       + '</div>';
     });
     html += '</div>';
@@ -2226,7 +2249,8 @@ function buildEmailHtml(list, opts){
   var regionCounts = {};
   list.forEach(function(s){
     platformCounts[s.platform] = (platformCounts[s.platform]||0) + 1;
-    regionCounts[s.region] = (regionCounts[s.region]||0) + 1;
+    // Multi-region entries count toward each region they cover.
+    entryRegions(s).forEach(function(r){ regionCounts[r] = (regionCounts[r]||0) + 1; });
   });
   var platformBreakdown = ALLOWED_PLATFORMS.filter(function(p){ return platformCounts[p]; })
     .map(function(p){ return p + ' ' + platformCounts[p]; }).join(' &nbsp;·&nbsp; ');
@@ -2241,12 +2265,18 @@ function buildEmailHtml(list, opts){
   // group: by region (top level) for the "all regions" digest, matching the
   // tool's own "By Region (Email view)"; by platform for a single-region digest.
   var groups = {}; var order = [];
-  var keyOf = groupByRegion ? function(s){ return s.region; } : function(s){ return s.platform; };
   var refOrder = groupByRegion ? ALLOWED_REGIONS : ALLOWED_PLATFORMS;
+  // When grouping by region, a multi-region entry lands under EACH of its regions
+  // (so every selected region's section reflects the update). By platform, each
+  // entry has one platform and appears once.
+  var keysOf = groupByRegion
+    ? function(s){ var r = entryRegions(s); return r.length ? r : ['']; }
+    : function(s){ return [s.platform]; };
   list.forEach(function(s){
-    var k = keyOf(s);
-    if (!groups[k]){ groups[k]=[]; order.push(k); }
-    groups[k].push(s);
+    keysOf(s).forEach(function(k){
+      if (!groups[k]){ groups[k]=[]; order.push(k); }
+      groups[k].push(s);
+    });
   });
   order.sort(function(a,b){
     var ia = refOrder.indexOf(a), ib = refOrder.indexOf(b);
@@ -2258,12 +2288,12 @@ function buildEmailHtml(list, opts){
 
   var itemsHtml = order.map(function(k){
     var items = groups[k];
+    // When grouping by region, k is the region for this section — use it as the
+    // per-row context so each row shows that region's label and link.
+    var ctxRegion = groupByRegion ? k : '';
     var rows = items.map(function(s){
       var accent = PLATFORM_BADGE_COLOR[s.platform] || '#1b2a4a';
-      var linkEl = s.link
-        ? '<a href="'+esc(s.link)+'" style="font-size:13px;font-weight:bold;color:#111111;text-decoration:none;">'
-            + '<font color="#111111" style="color:#111111;">Read more &#8594;</font></a>'
-        : '';
+      var linkEl = emailLinkBlock(s, null, ctxRegion);
 
       // No inline expander. <details> is ignored by Outlook, which renders the
       // summary label as dead text and dumps the whole body out beneath it —
@@ -2275,7 +2305,7 @@ function buildEmailHtml(list, opts){
             + '<td bgcolor="'+accent+'" width="4" style="background-color:'+accent+';width:4px;font-size:0;line-height:0;">&nbsp;</td>'
             + '<td valign="top" style="padding:16px 12px 16px 18px;width:40px;">' + platformBadge(s.platform, 40) + '</td>'
             + '<td valign="top" style="padding:16px 28px 16px 0;">'
-              + '<div style="font-family:Arial,Helvetica,sans-serif;font-size:11.5px;margin-bottom:5px;">' + platformRegionMeta(s) + '</div>'
+              + '<div style="font-family:Arial,Helvetica,sans-serif;font-size:11.5px;margin-bottom:5px;">' + platformRegionMeta(s, ctxRegion) + '</div>'
               + '<div style="font-size:16px;font-weight:700;color:#141414;margin-bottom:6px;line-height:1.3;">'+esc(s.title)+'</div>'
               + '<div style="font-size:15px;color:#333333;line-height:1.6;margin-bottom:8px;">'+esc(shortExcerpt(s,180))+'</div>'
               + linkEl
@@ -2556,20 +2586,70 @@ function platformBadge(platform, size){
 // names were coming through flat black. The <font> attribute is deprecated in
 // modern HTML but it is exactly what Word's renderer respects, so in email it is
 // the reliable one; the CSS covers every other client.
-function platformRegionMeta(s){
+function platformRegionMeta(s, contextRegion){
   var color = PLATFORM_BADGE_COLOR[s.platform] || '#1b2a4a';
+  // In a region-grouped section, show just that region. Otherwise show EVERY
+  // region the entry covers, so the meta line matches the interactive card.
+  var regionLabel = esc(
+    contextRegion ? contextRegion
+                  : (entryRegions(s).join(', ') || s.region || '')
+  );
   return '<font color="' + color + '" style="color:' + color + ';">'
       + '<span style="color:' + color + ';font-weight:bold;text-transform:uppercase;letter-spacing:.06em;">' + esc(s.platform) + '</span>'
     + '</font>'
     + '<font color="#c3cad3" style="color:#c3cad3;">&nbsp;|&nbsp;</font>'
     + '<font color="#2d3748" style="color:#2d3748;">'
-      + '<span style="color:#2d3748;font-weight:bold;">' + esc(s.region) + '</span>'
+      + '<span style="color:#2d3748;font-weight:bold;">' + regionLabel + '</span>'
     + '</font>'
     + (s.date
         ? '<font color="#8f9aa8" style="color:#8f9aa8;">'
             + '<span style="color:#8f9aa8;font-weight:normal;">&nbsp;&middot;&nbsp;' + esc(fmtDate(s.date)) + '</span>'
           + '</font>'
         : '');
+}
+
+// Build the "Read more" link block for an email row.
+//  - Single region (or only one region has a link): one "Read more →" link.
+//  - Multiple regions with their own links: one labelled link per region, so the
+//    email reflects every selected region and its region-specific URL.
+// `style` is the inline CSS applied to each <a>; a shared default is used if omitted.
+function emailLinkBlock(s, style, contextRegion){
+  style = style || 'font-size:13px;font-weight:bold;color:#111111;text-decoration:none;';
+  var regs = entryRegions(s);
+  var links = entryLinks(s);
+
+  // In a region-grouped section, show only that region's link (fall back to the
+  // primary link if that region has none), as a single "Read more →".
+  if (contextRegion){
+    var ctxUrl = links[contextRegion] || entryPrimaryLink(s);
+    return ctxUrl
+      ? '<a href="' + esc(ctxUrl) + '" style="' + style + '">'
+          + '<font color="#111111" style="color:#111111;">Read more &#8594;</font></a>'
+      : '';
+  }
+
+  var linkedRegs = regs.filter(function(r){ return links[r]; });
+
+  // One link total → keep the classic single "Read more →".
+  if (linkedRegs.length <= 1){
+    var only = entryPrimaryLink(s);
+    return only
+      ? '<a href="' + esc(only) + '" style="' + style + '">'
+          + '<font color="#111111" style="color:#111111;">Read more &#8594;</font></a>'
+      : '';
+  }
+
+  // Multiple region-specific links → one labelled link per region.
+  return '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">'
+    + linkedRegs.map(function(r){
+        return '<tr><td style="padding:2px 0;font-family:Arial,Helvetica,sans-serif;">'
+          + '<a href="' + esc(links[r]) + '" style="' + style + '">'
+            + '<font color="#111111" style="color:#111111;">'
+              + esc(r) + ': Read more &#8594;'
+            + '</font></a>'
+        + '</td></tr>';
+      }).join('')
+    + '</table>';
 }
 
 function buildExecEmailHtml(list, criticalList, opts){
@@ -2600,10 +2680,7 @@ function buildExecEmailHtml(list, criticalList, opts){
 
   var criticalHtml = criticalList.map(function(s, i){
     var accent = PLATFORM_BADGE_COLOR[s.platform] || '#1b2a4a';
-    var linkEl = s.link
-      ? '<a href="' + esc(s.link) + '" style="display:inline-block;font-size:13px;color:#111111;text-decoration:none;font-weight:bold;">'
-          + '<font color="#111111" style="color:#111111;">Read more &#8594;</font></a>'
-      : '';
+    var linkEl = emailLinkBlock(s, 'display:inline-block;font-size:13px;color:#111111;text-decoration:none;font-weight:bold;');
 
     // Every row uses the lettered, platform-coloured badge — no image thumbnails.
     // Screenshots read as an unreadable smudge at this size, and inline images
@@ -3022,11 +3099,10 @@ function richEditorHtml(b, i){
 }
 
 /* Region field for the Add pane.
-   A checkbox multi-select, used identically for new AND existing entries.
-   Ticking 2+ regions keeps everything in ONE entry (never split): the entry
-   carries a regions[] array plus a per-region links{} map. When editing, the
-   entry's saved regions come back with each one ticked, and one link field per
-   region is shown below. Reads from d.regions (array). */
+   - New entries: a checkbox multi-select. Ticking 2+ regions creates one entry
+     per region on save, each carrying its own region-specific link.
+   - Editing: a single dropdown (you're editing one existing slide).
+   Reads from d.regions (array). */
 function regionFieldHtml(d, editing){
   var chosen = Array.isArray(d.regions) ? d.regions : (d.region ? [d.region] : []);
   var boxes = ALLOWED_REGIONS.map(function(r){
@@ -3040,11 +3116,10 @@ function regionFieldHtml(d, editing){
     + '<span class="formfield__hint">Tick one or more. A single entry can cover several regions — each region gets its own link below.</span></div>';
 }
 
-/* Link field(s) for the Add pane. Applies the same in add and edit mode.
+/* Link field(s) for the Add pane.
    - 1 region chosen: a single Link / URL field.
    - 2+ regions chosen: one Link / URL field per selected region, so each
-     region can point at its own localised page — all within ONE entry.
-   So editing a 2-region entry shows 2 URL fields with the other fields shared. */
+     region can point at its own localised page — all within ONE entry. */
 function linkFieldHtml(d, editing){
   var chosen = Array.isArray(d.regions) ? d.regions : (d.region ? [d.region] : []);
   if (chosen.length > 1){
