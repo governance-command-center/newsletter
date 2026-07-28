@@ -432,6 +432,7 @@ function migrateFromLocalStorage(){
 // live, mutable working set. Seeded from the deck baked into index.html, then
 // overridden by anything previously saved to storage (see initSlides()).
 var slides = SEED.slides.slice();
+slides.forEach(function(s){ try { normalizeEntryRegions(s); } catch(e){} });
 var restoredFrom = null;
 
 // Async init: open IDB, migrate legacy data if needed, then load. Resolves when
@@ -451,9 +452,11 @@ function initSlides(){
       slides = saved.slides;
       restoredFrom = saved.savedAt;
     }
+    slides.forEach(normalizeEntryRegions);   // ensure regions[]/links{} on all entries
     // load archives too (independent of whether active slides were restored)
     return loadArchives().then(function(arr){
       archives = arr || [];
+      (archives || []).forEach(function(b){ (b.slides||[]).forEach(normalizeEntryRegions); });
       return true;
     });
   }).catch(function(){
@@ -690,16 +693,74 @@ function optionsHtml(options, selected){
 }
 
 /* ============================================================
+   MULTI-REGION ACCESSORS
+   ------------------------------------------------------------
+   An entry may cover several regions. The source of truth is:
+     s.regions : string[]              (one or more regions)
+     s.links   : { region: url, ... }  (per-region source link)
+   For backward compatibility every entry ALSO keeps:
+     s.region  : the primary (first) region  — used by legacy views
+     s.link    : the primary region's url     — used by legacy views
+   These helpers read whichever shape is present so old and new
+   entries both work, and normalizeEntryRegions() keeps the
+   derived primary fields in sync whenever an entry is saved.
+   ============================================================ */
+function entryRegions(s){
+  if (s && Array.isArray(s.regions) && s.regions.length) return s.regions.slice();
+  if (s && s.region) return [s.region];
+  return [];
+}
+function entryLinks(s){
+  var out = {};
+  var regs = entryRegions(s);
+  if (s && s.links && typeof s.links === 'object'){
+    regs.forEach(function(r){ if (s.links[r]) out[r] = s.links[r]; });
+  }
+  // fall back to the single link for the primary region if the map is missing it
+  if (s && s.link && regs.length && !out[regs[0]]) out[regs[0]] = s.link;
+  return out;
+}
+function entryPrimaryLink(s){
+  var regs = entryRegions(s);
+  var links = entryLinks(s);
+  for (var i=0;i<regs.length;i++){ if (links[regs[i]]) return links[regs[i]]; }
+  return (s && s.link) || '';
+}
+// True if the entry has more than one region.
+function isMultiRegion(s){ return entryRegions(s).length > 1; }
+// Normalise an entry's region shape in place: ensure regions[] & links{} exist
+// and keep the legacy region/link primary fields synced to regions[0].
+function normalizeEntryRegions(s){
+  if (!s) return s;
+  var regs = entryRegions(s);
+  s.regions = regs;
+  var links = {};
+  regs.forEach(function(r){
+    if (s.links && s.links[r]) links[r] = String(s.links[r]).trim();
+    else if (r === regs[0] && s.link) links[r] = String(s.link).trim();
+  });
+  s.links = links;
+  s.region = regs[0] || '';
+  s.link = (regs[0] && links[regs[0]]) ? links[regs[0]] : '';
+  return s;
+}
+
+/* ============================================================
    FILTERING
    ============================================================ */
 function matchesFilters(s){
   if (state.platforms.size && !state.platforms.has(s.platform)) return false;
-  if (state.regions.size && !state.regions.has(s.region)) return false;
+  if (state.regions.size){
+    // Match if ANY of the entry's regions is selected.
+    var regs = entryRegions(s);
+    var hit = regs.some(function(r){ return state.regions.has(r); });
+    if (!hit) return false;
+  }
   if (state.dateFrom && s.date && s.date < state.dateFrom) return false;
   if (state.dateTo && s.date && s.date > state.dateTo) return false;
   if (state.search){
     var q = state.search.toLowerCase();
-    var hay = (s.title + ' ' + s.platform + ' ' + s.region + ' ' +
+    var hay = (s.title + ' ' + s.platform + ' ' + entryRegions(s).join(' ') + ' ' +
       s.body.map(function(b){
         if (b.type === 'rich') return richToText(b.html);
         if (b.type === 'table') return (b.rows||[]).map(function(r){ return r.join(' '); }).join(' ');
@@ -717,12 +778,21 @@ function filteredSlides(){
 function groupAndOrder(list){
   var groups = {};
   var order = [];
-  var keyOf = state.view === 'region' ? function(s){ return s.region; } : function(s){ return s.platform; };
-  list.forEach(function(s){
-    var k = keyOf(s);
-    if (!groups[k]){ groups[k] = []; order.push(k); }
-    groups[k].push(s);
-  });
+  if (state.view === 'region'){
+    // A multi-region entry appears under each of its regions.
+    list.forEach(function(s){
+      entryRegions(s).forEach(function(k){
+        if (!groups[k]){ groups[k] = []; order.push(k); }
+        groups[k].push(s);
+      });
+    });
+  } else {
+    list.forEach(function(s){
+      var k = s.platform;
+      if (!groups[k]){ groups[k] = []; order.push(k); }
+      groups[k].push(s);
+    });
+  }
   var refOrder = state.view === 'region' ? ALLOWED_REGIONS : ALLOWED_PLATFORMS;
   order.sort(function(a,b){
     var ia = refOrder.indexOf(a), ib = refOrder.indexOf(b);
@@ -741,7 +811,7 @@ function renderFilterRail(){
 
   function chipsHtml(kind, options, activeSet){
     return options.map(function(opt){
-      var n = all.filter(function(s){ return kind === 'platform' ? s.platform === opt : s.region === opt; }).length;
+      var n = all.filter(function(s){ return kind === 'platform' ? s.platform === opt : entryRegions(s).indexOf(opt) !== -1; }).length;
       var active = activeSet.has(opt);
       return '<button type="button" class="chip'+(active?' is-active':'')+'" data-kind="'+kind+'" data-value="'+esc(opt)+'">'
         + esc(opt) + '<span class="chip__count">' + n + '</span></button>';
@@ -974,6 +1044,20 @@ function excerptOf(s){
 function renderCard(s){
   var isOpen = state.openCards.has(s.id);
   var initial = (s.platform || '?').charAt(0);
+  var regs = entryRegions(s);
+  var links = entryLinks(s);
+  var regionPills = regs.map(function(r){ return '<span class="pill">'+esc(r)+'</span>'; }).join('');
+  // Link row: single "Read more" for one region; per-region links when several.
+  var linkRow;
+  if (regs.length > 1){
+    var perLinks = regs.filter(function(r){ return links[r]; }).map(function(r){
+      return '<a class="card__link card__link--region" href="'+esc(links[r])+'" target="_blank" rel="noopener">'+esc(r)+' ↗</a>';
+    }).join('');
+    linkRow = perLinks ? '<div class="card__links">'+perLinks+'</div>' : '<span></span>';
+  } else {
+    var only = entryPrimaryLink(s);
+    linkRow = only ? '<a class="card__link" href="'+esc(only)+'" target="_blank" rel="noopener">Read more ↗</a>' : '<span></span>';
+  }
   return (
     '<article class="card" data-id="'+esc(s.id)+'">'
       + '<div class="card__badge" data-platform="'+esc(s.platform)+'">'+esc(initial)+'</div>'
@@ -981,13 +1065,13 @@ function renderCard(s){
         + '<h3 class="card__title">'+esc(s.title)+'</h3>'
         + '<div class="card__meta">'
           + '<span class="pill">'+esc(s.platform)+'</span>'
-          + '<span class="pill">'+esc(s.region)+'</span>'
+          + regionPills
           + (s.date ? '<span class="pill">'+esc(fmtDate(s.date))+'</span>' : '')
         + '</div>'
         + authorLine(s)
         + '<p class="card__excerpt">'+esc(excerptOf(s))+'</p>'
         + '<div class="card__row">'
-          + (s.link ? '<a class="card__link" href="'+esc(s.link)+'" target="_blank" rel="noopener">Read more ↗</a>' : '<span></span>')
+          + linkRow
           + '<button type="button" class="card__toggle" data-id="'+esc(s.id)+'">'+(isOpen ? 'Hide details' : 'View full update')+'</button>'
         + '</div>'
         + '<div class="card__full'+(isOpen ? ' is-open':'')+'">'+renderBody(s.body, false)+'</div>'
@@ -1765,6 +1849,272 @@ function exportPdf(listArg, labelArg){
   var list = listArg || (scope === 'filtered' ? filteredSlides() : slides);
   if (!list.length){ setStatus('Nothing to export — the current selection has no slides.', false); return; }
 
+  // Preferred path: build a real vector PDF with genuine, clickable link
+  // annotations (works no matter how the file is later opened). Falls back to
+  // the browser print dialog if jsPDF isn't available.
+  var jsPDFCtor = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
+  if (jsPDFCtor){
+    try {
+      exportPdfVector(list, labelArg, jsPDFCtor);
+      return;
+    } catch (e){
+      setStatus('Vector PDF failed ('+(e && e.message ? e.message : 'error')+') — falling back to the print dialog.', false);
+      // fall through to print path
+    }
+  }
+  exportPdfPrint(list, labelArg);
+}
+
+/* ---- Real (vector) PDF with clickable links via jsPDF ---------------------
+   Lays the content out by hand so every URL becomes a true PDF link annotation
+   (doc.link / textWithLink), which stays clickable in every PDF viewer. Rich
+   HTML is walked into styled text runs; tables and images are drawn directly. */
+function exportPdfVector(list, labelArg, jsPDFCtor){
+  var doc = new jsPDFCtor({ unit:'pt', format:'a4', compress:true });
+  var PAGE_W = doc.internal.pageSize.getWidth();
+  var PAGE_H = doc.internal.pageSize.getHeight();
+  var M = 40;                 // page margin
+  var CW = PAGE_W - M*2;      // content width
+  var y = M;
+  var LINK_COLOR = [37, 99, 235];
+
+  function ensure(space){
+    if (y + space > PAGE_H - M){ doc.addPage(); y = M; }
+  }
+  function setFont(style, size){ doc.setFont('helvetica', style); doc.setFontSize(size); }
+
+  // Draw a sequence of styled runs [{text, bold, italic, color, href}] with
+  // wrapping. Links get a real annotation over their drawn area.
+  function drawRuns(runs, size, lineGap, indent){
+    indent = indent || 0;
+    var x = M + indent;
+    var maxX = M + CW;
+    var lineH = size * 1.35 + (lineGap||0);
+    ensure(lineH);
+    runs.forEach(function(run){
+      setFont((run.bold?'bold':'') + (run.italic?'italic':'') || 'normal', size);
+      var words = String(run.text).split(/(\s+)/); // keep spaces
+      words.forEach(function(w){
+        if (w === '') return;
+        var wWidth = doc.getTextWidth(w);
+        if (x + wWidth > maxX && w.trim() !== ''){
+          x = M + indent; y += lineH; ensure(lineH);
+        }
+        var drawY = y + size;                     // baseline
+        if (run.href){
+          doc.setTextColor(LINK_COLOR[0], LINK_COLOR[1], LINK_COLOR[2]);
+          doc.textWithLink(w, x, drawY, { url: run.href });
+          // underline
+          doc.setDrawColor(LINK_COLOR[0], LINK_COLOR[1], LINK_COLOR[2]);
+          doc.setLineWidth(0.5);
+          doc.line(x, drawY+1.5, x+wWidth, drawY+1.5);
+        } else {
+          var c = run.color || [30,30,30];
+          doc.setTextColor(c[0], c[1], c[2]);
+          doc.text(w, x, drawY);
+        }
+        x += wWidth;
+      });
+    });
+    doc.setTextColor(30,30,30);
+    y += lineH;
+    return y;
+  }
+
+  // Walk sanitized rich HTML into a list of blocks: {kind:'para'|'header'|'bullet', runs:[...]}
+  function htmlToBlocks(html){
+    var blocks = [];
+    var container = document.createElement('div');
+    container.innerHTML = sanitizeRichHtml(html || '');
+    function runsFrom(node, inherited){
+      inherited = inherited || {};
+      var runs = [];
+      node.childNodes.forEach(function(ch){
+        if (ch.nodeType === 3){ // text
+          var t = ch.nodeValue.replace(/\s+/g,' ');
+          if (t) runs.push({ text:t, bold:inherited.bold, italic:inherited.italic, href:inherited.href, color:inherited.color });
+        } else if (ch.nodeType === 1){
+          var tag = ch.tagName.toUpperCase();
+          var next = { bold:inherited.bold, italic:inherited.italic, href:inherited.href, color:inherited.color };
+          if (tag === 'B' || tag === 'STRONG') next.bold = true;
+          if (tag === 'I' || tag === 'EM') next.italic = true;
+          if (tag === 'A'){ next.href = ch.getAttribute('href') || inherited.href; }
+          if (tag === 'BR'){ runs.push({ text:'\n' }); return; }
+          runs = runs.concat(runsFrom(ch, next));
+        }
+      });
+      return runs;
+    }
+    function hasBlockChild(node){
+      return Array.prototype.some.call(node.childNodes, function(ch){
+        if (ch.nodeType !== 1) return false;
+        var t = ch.tagName.toUpperCase();
+        return t==='UL'||t==='OL'||t==='TABLE'||t==='P'||t==='H4'||t==='H5'||t==='DIV';
+      });
+    }
+    function walk(node){
+      node.childNodes.forEach(function(ch){
+        if (ch.nodeType === 1){
+          var tag = ch.tagName.toUpperCase();
+          if (tag === 'UL' || tag === 'OL'){
+            ch.childNodes.forEach(function(li){
+              if (li.nodeType===1 && li.tagName.toUpperCase()==='LI')
+                blocks.push({ kind:'bullet', runs: runsFrom(li, {}) });
+            });
+          } else if (tag === 'H4' || tag === 'H5'){
+            blocks.push({ kind:'header', runs: runsFrom(ch, { bold:true }) });
+          } else if (tag === 'TABLE'){
+            var rows = [];
+            ch.querySelectorAll('tr').forEach(function(tr){
+              var cells = [];
+              tr.querySelectorAll('th,td').forEach(function(td){ cells.push((td.textContent||'').trim()); });
+              if (cells.length) rows.push(cells);
+            });
+            if (rows.length) blocks.push({ kind:'table', rows:rows });
+          } else if (tag === 'P'){
+            // paragraphs are leaves — collect inline runs, never recurse
+            var r = runsFrom(ch, {});
+            if (r.length) blocks.push({ kind:'para', runs:r });
+          } else if (tag === 'DIV'){
+            // a DIV is either a structural wrapper (has block children → recurse
+            // into it, don't emit its own runs) or an inline text container
+            // (no block children → emit as one paragraph).
+            if (hasBlockChild(ch)){
+              walk(ch);
+            } else {
+              var rd = runsFrom(ch, {});
+              if (rd.length) blocks.push({ kind:'para', runs:rd });
+            }
+          } else {
+            var rr = runsFrom(ch, {});
+            if (rr.length) blocks.push({ kind:'para', runs:rr });
+          }
+        } else if (ch.nodeType === 3 && ch.nodeValue.trim()){
+          blocks.push({ kind:'para', runs:[{ text: ch.nodeValue.replace(/\s+/g,' ') }] });
+        }
+      });
+    }
+    walk(container);
+    return blocks;
+  }
+
+  function drawTable(rows){
+    var cols = rows.reduce(function(m,r){ return Math.max(m, r.length); }, 0) || 1;
+    var colW = CW / cols;
+    var pad = 4, size = 9;
+    setFont('normal', size);
+    rows.forEach(function(row, ri){
+      // measure row height
+      var cellLines = row.map(function(cell){
+        return doc.splitTextToSize(String(cell||''), colW - pad*2);
+      });
+      var rowH = Math.max.apply(null, cellLines.map(function(l){ return l.length; })) * (size*1.3) + pad*2;
+      ensure(rowH);
+      var x = M;
+      row.forEach(function(cell, ci){
+        // cell border + header shading
+        if (ri === 0){ doc.setFillColor(238,240,244); doc.rect(x, y, colW, rowH, 'F'); }
+        doc.setDrawColor(200,204,210); doc.setLineWidth(0.5); doc.rect(x, y, colW, rowH);
+        setFont(ri===0?'bold':'normal', size);
+        doc.setTextColor(30,30,30);
+        var lines = cellLines[ci] || [''];
+        lines.forEach(function(ln, li){ doc.text(ln, x+pad, y+pad+size+ (li*(size*1.3))); });
+        x += colW;
+      });
+      y += rowH;
+    });
+    y += 6;
+  }
+
+  function drawImage(dataUrl){
+    try {
+      var props = doc.getImageProperties(dataUrl);
+      var ratio = props.height / props.width;
+      var w = Math.min(CW, props.width);
+      var h = w * ratio;
+      if (h > PAGE_H - M*2){ h = PAGE_H - M*2; w = h / ratio; }
+      ensure(h + 6);
+      var fmt = (props.fileType || 'PNG');
+      doc.addImage(dataUrl, fmt, M, y, w, h);
+      y += h + 6;
+    } catch(e){ /* skip unreadable image */ }
+  }
+
+  // ---- Document header ----
+  var scopeLabel = labelArg || (currentExportScope() === 'all' ? 'All updates' : 'Filtered view');
+  setFont('bold', 20); doc.setTextColor(17,17,17);
+  ensure(26); doc.text('Platform Updates', M, y+18); y += 30;
+  setFont('normal', 9); doc.setTextColor(90,90,90);
+  var sub = scopeLabel + '  ·  Grouped by ' + (state.view==='region'?'Region':'Platform')
+    + '  ·  Exported ' + new Date().toLocaleString() + '  ·  ' + list.length + ' update' + (list.length===1?'':'s');
+  doc.text(doc.splitTextToSize(sub, CW), M, y+9); y += 26;
+  doc.setDrawColor(210,214,220); doc.setLineWidth(1); doc.line(M, y, M+CW, y); y += 14;
+
+  // ---- Groups & cards ----
+  var g = groupAndOrder(list);
+  g.order.forEach(function(k, gi){
+    if (gi > 0){ doc.addPage(); y = M; }
+    ensure(24);
+    setFont('bold', 14); doc.setTextColor(17,17,17);
+    doc.text(String(k), M, y+12); y += 22;
+    doc.setDrawColor(230,232,236); doc.setLineWidth(0.5); doc.line(M, y, M+CW, y); y += 12;
+
+    g.groups[k].forEach(function(s){
+      ensure(40);
+      // title
+      setFont('bold', 13); doc.setTextColor(17,17,17);
+      var tLines = doc.splitTextToSize(s.title || '', CW);
+      tLines.forEach(function(ln){ ensure(18); doc.text(ln, M, y+12); y += 16; });
+      // meta
+      setFont('normal', 9); doc.setTextColor(110,110,110);
+      var regs = entryRegions(s);
+      var meta = s.platform + '  ·  ' + regs.join(', ') + (s.date ? '  ·  ' + fmtDate(s.date) : '');
+      ensure(14); doc.text(meta, M, y+9); y += 16;
+
+      // body
+      (s.body || []).forEach(function(b){
+        if (b.type === 'image'){
+          if (b.dataUrl) drawImage(b.dataUrl);
+        } else if (b.type === 'table' && Array.isArray(b.rows)){
+          drawTable(b.rows);
+        } else if (b.type === 'rich'){
+          htmlToBlocks(b.html).forEach(function(blk){
+            if (blk.kind === 'table'){ drawTable(blk.rows); return; }
+            if (blk.kind === 'header'){ y += 2; drawRuns(blk.runs, 11, 1); }
+            else if (blk.kind === 'bullet'){
+              // bullet dot + indented runs
+              ensure(14); setFont('normal', 10.5); doc.setTextColor(30,30,30);
+              doc.text('•', M+6, y+11);
+              drawRuns(blk.runs, 10.5, 1, 18);
+            } else { drawRuns(blk.runs, 10.5, 1); }
+          });
+        } else if (b.type === 'header'){ y += 2; drawRuns([{text:b.text, bold:true}], 11, 1); }
+        else if (b.type === 'para'){ drawRuns([{text:b.text}], 10.5, 1); }
+        else if (b.type === 'bullet'){ ensure(14); doc.text('•', M+6, y+11); drawRuns([{text:b.text}], 10.5, 1, 18); }
+      });
+
+      // links (per region when multi-region, else single)
+      var links = entryLinks(s);
+      if (regs.length > 1){
+        regs.forEach(function(r){
+          if (!links[r]) return;
+          drawRuns([{ text: r + ': ', bold:true }, { text: links[r], href: links[r] }], 9.5, 1);
+        });
+      } else {
+        var only = entryPrimaryLink(s);
+        if (only) drawRuns([{ text:'Read more: ', bold:true }, { text: only, href: only }], 9.5, 1);
+      }
+      y += 12; // gap between cards
+    });
+  });
+
+  var stamp = new Date().toISOString().slice(0,10);
+  var slug = (labelArg ? labelArg.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'') : (currentExportScope()==='all'?'all':'filtered')) || 'export';
+  doc.save('platform-updates-'+slug+'-'+stamp+'.pdf');
+  setStatus('Exported a PDF with '+list.length+' update'+(list.length===1?'':'s')+' — all links are clickable.', true);
+}
+
+function exportPdfPrint(list, labelArg){
   var printArea = document.getElementById('printArea');
   printArea.innerHTML = buildPrintDoc(list, labelArg);
 
@@ -2571,16 +2921,18 @@ function draftFromSlide(s){
   });
   flushText();
 
+  var _regs = entryRegions(s);
+  var _links = entryLinks(s);
   return {
     id: s.id,
     platform: s.platform,
-    region: s.region,
-    regions: s.region ? [s.region] : [],   // editing targets one slide → one region
+    region: _regs[0] || '',
+    regions: _regs.slice(),                 // full multi-region set, editable as-is
     date: s.date || '',
     date_range: s.date_range || '',
     title: s.title || '',
-    link: s.link || '',
-    links: (s.region && s.link) ? (function(){ var m={}; m[s.region]=s.link; return m; })() : {},
+    link: (_regs[0] && _links[_regs[0]]) ? _links[_regs[0]] : (s.link || ''),
+    links: (function(){ var m={}; _regs.forEach(function(r){ if (_links[r]) m[r]=_links[r]; }); return m; })(),
     body: body.length ? body : [{ type:'rich', html:'' }]
   };
 }
@@ -2675,12 +3027,7 @@ function richEditorHtml(b, i){
    - Editing: a single dropdown (you're editing one existing slide).
    Reads from d.regions (array). */
 function regionFieldHtml(d, editing){
-  if (editing){
-    return '<div class="formfield"><label>Region</label>'
-      + '<select id="fRegion">'+optionsHtml(ALLOWED_REGIONS, d.region)+'</select>'
-      + '<span class="formfield__hint">Editing one entry — change its region here.</span></div>';
-  }
-  var chosen = Array.isArray(d.regions) ? d.regions : [];
+  var chosen = Array.isArray(d.regions) ? d.regions : (d.region ? [d.region] : []);
   var boxes = ALLOWED_REGIONS.map(function(r){
     var on = chosen.indexOf(r) !== -1;
     return '<label class="regionchk'+(on?' is-on':'')+'">'
@@ -2689,15 +3036,15 @@ function regionFieldHtml(d, editing){
   }).join('');
   return '<div class="formfield formfield--wide"><label>Region(s)</label>'
     + '<div class="regionmulti" id="fRegionMulti">'+boxes+'</div>'
-    + '<span class="formfield__hint">Tick one or more. Choosing several creates one entry per region — each with its own link below.</span></div>';
+    + '<span class="formfield__hint">Tick one or more. A single entry can cover several regions — each region gets its own link below.</span></div>';
 }
 
 /* Link field(s) for the Add pane.
-   - 0 or 1 region chosen (or editing): a single Link / URL field.
+   - 1 region chosen: a single Link / URL field.
    - 2+ regions chosen: one Link / URL field per selected region, so each
-     region's entry can point at its own localised page. */
+     region can point at its own localised page — all within ONE entry. */
 function linkFieldHtml(d, editing){
-  var chosen = editing ? (d.region ? [d.region] : []) : (Array.isArray(d.regions) ? d.regions : []);
+  var chosen = Array.isArray(d.regions) ? d.regions : (d.region ? [d.region] : []);
   if (chosen.length > 1){
     var rows = chosen.map(function(r){
       var val = (d.links && d.links[r] != null) ? d.links[r] : '';
@@ -2708,7 +3055,7 @@ function linkFieldHtml(d, editing){
     }).join('');
     return '<div class="formfield formfield--wide" id="fLinkWrap"><label>Region-specific link / URL (optional)</label>'
       + '<div class="linkmulti">'+rows+'</div>'
-      + '<span class="formfield__hint">Each region\'s entry uses its own link. Leave any blank to omit that region\'s link.</span></div>';
+      + '<span class="formfield__hint">Each region uses its own link. Leave any blank to omit that region\'s link.</span></div>';
   }
   var only = chosen[0];
   var single = only && d.links && d.links[only] != null ? d.links[only] : d.link;
@@ -2742,7 +3089,7 @@ function renderAddPane(wrap){
       + '<td class="entrytable__check"><input type="checkbox" class="archiveCheck" data-id="'+esc(s.id)+'" aria-label="Select for archive"></td>'
       + '<td class="entrytable__title">'+esc(s.title)+'</td>'
       + '<td>'+esc(s.platform)+'</td>'
-      + '<td>'+esc(s.region)+'</td>'
+      + '<td>'+esc(entryRegions(s).join(', '))+'</td>'
       + '<td>'+esc(s.date ? fmtDate(s.date) : (s.date_range||'—'))+'</td>'
       + '<td>'+esc(s.createdBy || '—')+'</td>'
       + '<td style="white-space:nowrap;">'+esc(fmtStamp(s.createdAt))+'</td>'
@@ -2756,7 +3103,7 @@ function renderAddPane(wrap){
   wrap.innerHTML =
     '<div class="panel">'
       + '<div class="panel__head"><h2 class="panel__title">'+(editing?'Edit entry':'Add a new entry')+'</h2></div>'
-      + '<p class="panel__hint">Fill in the update below. <strong>Details</strong> is a rich-text editor — type freely, then select text and use the toolbar for <strong>bold</strong>, italic, headers, bullet lists, font size, colour and links. You can also <strong>paste a table</strong> straight into a text block and it will fit the width automatically. Add image blocks for pictures (up to 2). Everything flows into the browse views, presentation, email summary and PDF export.</p>'
+      + '<p class="panel__hint">Fill in the update below. A single entry can cover <strong>several regions</strong> — tick each one under Region(s), and give each region its own link. <strong>Details</strong> is a rich-text editor — type freely, then select text and use the toolbar for <strong>bold</strong>, italic, headers, bullet lists, font size, colour and links. You can also <strong>paste a table</strong> straight into a text block and it will fit the width automatically. Add image blocks for pictures (up to 2). Everything flows into the browse views, presentation, email summary and PDF export.</p>'
 
       + '<div class="formgrid">'
         + '<div class="formfield"><label>Platform</label><select id="fPlatform">'+optionsHtml(ALLOWED_PLATFORMS, d.platform)+'</select></div>'
@@ -2824,33 +3171,32 @@ function syncDraftFromForm(){
   d.date_range = g('fRange');
   d.title = g('fTitle');
 
-  // --- Region(s): dropdown when editing, checkbox multi-select when adding ---
-  var singleRegion = document.getElementById('fRegion');
-  if (singleRegion){                 // editing an existing entry
-    d.region = singleRegion.value || d.region;
-    d.regions = d.region ? [d.region] : [];
-  } else {                           // adding — read the checkbox group
-    var chosen = Array.prototype.slice
-      .call(document.querySelectorAll('.fRegionChk'))
+  // --- Region(s): checkbox multi-select (same for add and edit) ---
+  var regionChks = document.querySelectorAll('.fRegionChk');
+  if (regionChks.length){
+    var chosen = Array.prototype.slice.call(regionChks)
       .filter(function(c){ return c.checked; })
       .map(function(c){ return c.value; });
     d.regions = chosen;
-    d.region = chosen[0] || '';      // primary region (single-region path / fallback)
+    d.region = chosen[0] || '';      // primary region (fallback for legacy views)
   }
 
   // --- Link(s): per-region fields when >1 region, else the single field ---
   if (!d.links || typeof d.links !== 'object') d.links = {};
   var perRegion = document.querySelectorAll('.fLinkRegion');
   if (perRegion.length){
+    // Rebuild the map from the visible fields so removing a region drops its link.
+    var fresh = {};
     perRegion.forEach(function(inp){
       var r = inp.getAttribute('data-region');
-      if (r) d.links[r] = inp.value;
+      if (r) fresh[r] = inp.value;
     });
-    // keep d.link meaningful for the primary region
-    d.link = (d.region && d.links[d.region] != null) ? d.links[d.region] : (d.link || '');
+    d.links = fresh;
+    d.link = (d.region && fresh[d.region] != null) ? fresh[d.region] : (d.link || '');
   } else {
     d.link = g('fLink');
-    if (d.region) d.links[d.region] = d.link;
+    if (d.region){ var m = {}; m[d.region] = d.link; d.links = m; }
+    else d.links = {};
   }
 
   // rich contenteditable blocks -> sanitised HTML
@@ -2877,8 +3223,8 @@ function wireAddPane(wrap){
     el.addEventListener('input', function(){ syncDraftFromForm(); });
   });
 
-  // region multi-select (Add mode): ticking a box may add/remove per-region
-  // link fields, so capture current input then re-render the pane.
+  // region multi-select: ticking a box may add/remove per-region link fields,
+  // so capture current input then re-render the pane (applies to add and edit).
   wrap.querySelectorAll('.fRegionChk').forEach(function(chk){
     chk.addEventListener('change', function(){
       syncDraftFromForm();
@@ -3132,7 +3478,7 @@ function saveEntry(wrap){
     setStatus('Hold on — an image is still uploading. Try again in a moment.', false); return;
   }
   if (!d.title.trim()){ setStatus('Give the entry a title before saving.', false); return; }
-  var regions = (!d.id && Array.isArray(d.regions) && d.regions.length)
+  var regions = (Array.isArray(d.regions) && d.regions.length)
     ? d.regions.slice()
     : (d.region ? [d.region] : []);
   if (!regions.length){ setStatus('Pick at least one region.', false); return; }
@@ -3156,38 +3502,32 @@ function saveEntry(wrap){
 
   if (!body.length){ setStatus('Add at least one detail — a text block, image or table.', false); return; }
 
-  // Resolve the link for a given region: prefer its region-specific value, then
-  // fall back to the single link field.
-  function linkFor(region){
-    var v = (d.links && d.links[region] != null && String(d.links[region]).trim() !== '')
-      ? d.links[region] : d.link;
-    return String(v || '').trim();
-  }
-  // Deep-ish copy of the cleaned body so multiple region entries don't share
-  // the same block objects (avoids one edit later mutating all of them).
-  function cloneBody(){
-    return body.map(function(b){
-      if (b.type === 'table') return { type:'table', rows: b.rows.map(function(r){ return r.slice(); }) };
-      if (b.type === 'image') return { type:'image', file:b.file||'', dataUrl:b.dataUrl||null };
-      return { type:'rich', html: b.html };
-    });
-  }
+  // Build the per-region link map, keeping only links for the chosen regions.
+  var links = {};
+  regions.forEach(function(r){
+    var v = (d.links && d.links[r] != null) ? d.links[r] : (r === regions[0] ? d.link : '');
+    v = String(v || '').trim();
+    if (v) links[r] = v;
+  });
 
   var who = (AUTH.getSession() && AUTH.getSession().username) || 'unknown';
   var now = Date.now();
 
+  // ONE entry — carries all regions and their links. region/link mirror the
+  // primary (first) region so legacy views keep working.
+  var payload = {
+    platform: normalizePlatform(d.platform),
+    regions: regions,
+    links: links,
+    region: regions[0],
+    link: links[regions[0]] || '',
+    date: d.date || '',
+    date_range: d.date_range.trim(),
+    title: d.title.trim(),
+    body: body
+  };
+
   if (d.id){
-    // Editing: always a single entry with a single region.
-    var region = regions[0];
-    var payload = {
-      platform: normalizePlatform(d.platform),
-      region: region,
-      date: d.date || '',
-      date_range: d.date_range.trim(),
-      title: d.title.trim(),
-      link: linkFor(region),
-      body: cloneBody()
-    };
     var idx = slides.findIndex(function(s){ return s.id === d.id; });
     if (idx !== -1){
       var prev = slides[idx];
@@ -3199,32 +3539,19 @@ function saveEntry(wrap){
       payload.updatedAt = now;
       slides[idx] = payload;
     }
-    setStatus('Saved changes to "'+payload.title+'".', true);
+    setStatus('Saved changes to "'+payload.title+'"'
+      + (regions.length > 1 ? ' ('+regions.length+' regions: '+regions.join(', ')+').' : '.'), true);
   } else {
-    // Adding: one entry per selected region, each with its own link.
-    regions.forEach(function(region){
-      var payload = {
-        platform: normalizePlatform(d.platform),
-        region: region,
-        date: d.date || '',
-        date_range: d.date_range.trim(),
-        title: d.title.trim(),
-        link: linkFor(region),
-        body: cloneBody()
-      };
-      payload.id = nextId();
-      payload.slide_num = nextSlideNum();
-      payload.createdBy = who;
-      payload.createdAt = now;
-      payload.updatedBy = who;
-      payload.updatedAt = now;
-      slides.push(payload);
-    });
-    if (regions.length === 1){
-      setStatus('Added "'+d.title.trim()+'". '+slides.length+' entries total.', true);
-    } else {
-      setStatus('Added "'+d.title.trim()+'" for '+regions.length+' regions ('+regions.join(', ')+'). '+slides.length+' entries total.', true);
-    }
+    payload.id = nextId();
+    payload.slide_num = nextSlideNum();
+    payload.createdBy = who;
+    payload.createdAt = now;
+    payload.updatedBy = who;
+    payload.updatedAt = now;
+    slides.push(payload);
+    setStatus('Added "'+payload.title+'"'
+      + (regions.length > 1 ? ' covering '+regions.length+' regions ('+regions.join(', ')+'). ' : '. ')
+      + slides.length+' entries total.', true);
   }
 
   state.execHtml = null; state.digestHtml = null;
@@ -3369,25 +3696,38 @@ function renderPresent(){
   var i = state.present.index;
   var s = list[i];
 
-  // breadcrumb: date › region › platform
+  // breadcrumb: date › region(s) › platform
+  var pRegs = entryRegions(s);
   crumbs.innerHTML =
     '<span class="present__crumb present__crumb--date">'+esc(s.date ? fmtDate(s.date) : (s.date_range || 'Undated'))+'</span>'
     + '<span class="present__crumbsep">&rsaquo;</span>'
-    + '<span class="present__crumb">'+esc(s.region)+'</span>'
+    + '<span class="present__crumb">'+esc(pRegs.join(', '))+'</span>'
     + '<span class="present__crumbsep">&rsaquo;</span>'
     + '<span class="present__crumb">'+esc(s.platform)+'</span>';
 
   counter.textContent = (i+1) + ' / ' + list.length;
 
+  var pLinks = entryLinks(s);
+  var presentLinkHtml;
+  if (pRegs.length > 1){
+    var parts = pRegs.filter(function(r){ return pLinks[r]; }).map(function(r){
+      return '<a class="present__link present__link--region" href="'+esc(pLinks[r])+'" target="_blank" rel="noopener">'+esc(r)+' ↗</a>';
+    }).join('');
+    presentLinkHtml = parts ? '<div class="present__links">'+parts+'</div>' : '';
+  } else {
+    var pOnly = entryPrimaryLink(s);
+    presentLinkHtml = pOnly ? '<a class="present__link" href="'+esc(pOnly)+'" target="_blank" rel="noopener">Open source ↗</a>' : '';
+  }
+
   stage.innerHTML =
     '<div class="present__card">'
       + '<div class="present__eyebrow">'
         + '<span class="present__tag present__tag--platform">'+esc(s.platform)+'</span>'
-        + '<span class="present__tag">'+esc(s.region)+'</span>'
+        + pRegs.map(function(r){ return '<span class="present__tag">'+esc(r)+'</span>'; }).join('')
         + (s.date ? '<span class="present__tag">'+esc(fmtDate(s.date))+'</span>' : (s.date_range ? '<span class="present__tag">'+esc(s.date_range)+'</span>' : ''))
       + '</div>'
       + '<h1 class="present__title">'+esc(s.title)+'</h1>'
-      + (s.link ? '<a class="present__link" href="'+esc(s.link)+'" target="_blank" rel="noopener">Open source ↗</a>' : '')
+      + presentLinkHtml
       + '<div class="present__content">'+renderBody(s.body, false)+'</div>'
     + '</div>';
   stage.scrollTop = 0;
@@ -3529,7 +3869,7 @@ function renderArchivePane(wrap){
         + '<td class="entrytable__check"><input type="checkbox" class="restoreCheck" data-batch="'+esc(b.id)+'" data-id="'+esc(s.id)+'" aria-label="Select to restore"></td>'
         + '<td class="entrytable__title">'+esc(s.title)+'</td>'
         + '<td>'+esc(s.platform)+'</td>'
-        + '<td>'+esc(s.region)+'</td>'
+        + '<td>'+esc(entryRegions(s).join(', '))+'</td>'
         + '<td>'+esc(s.date ? fmtDate(s.date) : (s.date_range||'—'))+'</td>'
       + '</tr>';
     }).join('');
@@ -3649,7 +3989,7 @@ function renderExportPane(wrap){
   wrap.innerHTML =
     '<div class="panel">'
       + '<div class="panel__head"><h2 class="panel__title">Export slides</h2></div>'
-      + '<p class="panel__hint">Exports respect the Platform / Region / Date / Search filters set on the browse view. <strong>Export as Email</strong> produces the same styled briefing as the Generate email tab — reporting period, summary, per-platform counts, and every update with its platform badge and source link — as a self-contained <code>.html</code> file you can open, forward, or paste into your inbox.</p>'
+      + '<p class="panel__hint">Exports respect the Platform / Region / Date / Search filters set on the browse view. <strong>Export as PDF</strong> builds a real PDF where every link — the source links and any links inside the details — is clickable in any PDF reader. <strong>Export as Email</strong> produces the same styled briefing as the Generate email tab — reporting period, summary, per-platform counts, and every update with its platform badge and source link — as a self-contained <code>.html</code> file you can open, forward, or paste into your inbox.</p>'
       + '<div class="scopepick">'
         + '<label><input type="radio" name="exportScope" value="filtered" checked> Current filtered view ('+filteredSlides().length+')</label>'
         + '<label><input type="radio" name="exportScope" value="all"> All slides ('+slides.length+')</label>'
@@ -3997,6 +4337,8 @@ function bootApp(){
     if (data){
       if (Array.isArray(data.slides)) slides = data.slides;
       if (Array.isArray(data.archives)) archives = data.archives;
+      slides.forEach(normalizeEntryRegions);
+      (archives || []).forEach(function(b){ (b.slides||[]).forEach(normalizeEntryRegions); });
       restoredFrom = Date.now();
       // Refresh local cache to match shared truth.
       if (HAS_STORAGE){
