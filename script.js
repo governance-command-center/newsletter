@@ -1698,7 +1698,7 @@ function buildPrintDoc(list, titleLabel){
         + '<h3 class="pdf-card__title">'+esc(s.title)+'</h3>'
         + '<div class="pdf-card__meta">'+esc(s.platform)+' · '+esc(s.region)+(s.date ? ' · '+esc(fmtDate(s.date)) : '')+'</div>'
         + renderBody(s.body, true)
-        + (s.link ? '<div class="pdf-card__link"><a href="'+esc(s.link)+'">Read more \u2197</a></div>' : '')
+        + (s.link ? '<div class="pdf-card__link"><a href="'+esc(s.link)+'">Read more \u2197</a><div class="pdf-card__url">'+esc(s.link)+'</div></div>' : '')
       + '</div>';
     });
     html += '</div>';

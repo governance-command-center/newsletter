@@ -560,6 +560,7 @@ input[type="file"]{display:none;}
 .pdf-card img{max-width:100%;margin:6px 0;border:1px solid #ccc;page-break-inside:avoid;}
 .pdf-card__link{font-size:11px;margin-top:4px;}
 .pdf-card__link a{color:var(--accent);font-weight:600;text-decoration:none;}
+.pdf-card__url{font-family:var(--mono);font-size:9.5px;color:#777;word-break:break-all;margin-top:1px;}
 
 @media print{
   body > *:not(#printArea){display:none !important;}
