@@ -1688,8 +1688,11 @@ function buildPrintDoc(list, titleLabel){
     + '<h1 class="pdf-doc__title">Platform Updates</h1>'
     + '<p class="pdf-doc__sub">'+esc(scopeLabel)+' · Grouped by '+(state.view === 'region' ? 'Region' : 'Platform')+' · Exported '+esc(new Date().toLocaleString())+' · '+list.length+' update'+(list.length===1?'':'s')+'</p>';
 
-  g.order.forEach(function(k){
-    html += '<div class="pdf-group"><h2 class="pdf-group__title">'+esc(k)+'</h2>';
+  g.order.forEach(function(k, gi){
+    // Every group after the first starts on a fresh page. The first group
+    // stays on page 1 right under the document header (no leading blank page).
+    var groupClass = 'pdf-group' + (gi === 0 ? ' pdf-group--first' : '');
+    html += '<div class="'+groupClass+'"><h2 class="pdf-group__title">'+esc(k)+'</h2>';
     g.groups[k].forEach(function(s){
       html += '<div class="pdf-card">'
         + '<h3 class="pdf-card__title">'+esc(s.title)+'</h3>'

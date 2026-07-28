@@ -541,18 +541,23 @@ input[type="file"]{display:none;}
 .pdf-doc{padding:0;}
 .pdf-doc__title{font-family:var(--display);font-weight:800;font-size:26px;margin:0 0 2px;}
 .pdf-doc__sub{font-family:var(--mono);font-size:11px;color:#555;margin:0 0 20px;}
-.pdf-group{margin-bottom:22px;}
-.pdf-group__title{font-family:var(--display);font-weight:700;font-size:17px;border-bottom:2px solid var(--accent);padding-bottom:6px;margin:0 0 10px;}
-.pdf-card{margin-bottom:16px;page-break-inside:avoid;}
-.pdf-card__title{font-family:var(--display);font-weight:700;font-size:14px;margin:0 0 4px;}
-.pdf-card__meta{font-family:var(--mono);font-size:10px;color:#555;margin-bottom:6px;}
-.pdf-card h4{font-size:12.5px;margin:8px 0 3px;}
-.pdf-card p{font-size:12px;line-height:1.5;margin:0 0 5px;}
+.pdf-group{margin-bottom:22px;page-break-before:always;}
+.pdf-group--first{page-break-before:auto;}
+.pdf-group__title{font-family:var(--display);font-weight:700;font-size:17px;border-bottom:2px solid var(--accent);padding-bottom:6px;margin:0 0 10px;page-break-after:avoid;}
+/* Let long cards flow across a page break naturally instead of being pushed
+   as one unbreakable block — that's what left a large blank gap under a
+   group heading whenever the next card was taller than the remaining page. */
+.pdf-card{margin-bottom:16px;}
+.pdf-card__title{font-family:var(--display);font-weight:700;font-size:14px;margin:0 0 4px;page-break-after:avoid;}
+.pdf-card__meta{font-family:var(--mono);font-size:10px;color:#555;margin-bottom:6px;page-break-after:avoid;}
+.pdf-card h4{font-size:12.5px;margin:8px 0 3px;page-break-after:avoid;}
+.pdf-card p{font-size:12px;line-height:1.5;margin:0 0 5px;orphans:3;widows:3;}
 .pdf-card ul{margin:0 0 6px;padding-left:18px;}
 .pdf-card li{font-size:12px;line-height:1.5;}
-.pdf-card table{border-collapse:collapse;width:100%;margin:6px 0;font-size:10.5px;}
+/* Tables and images still shouldn't be sliced mid-element — those keep "avoid". */
+.pdf-card table{border-collapse:collapse;width:100%;margin:6px 0;font-size:10.5px;page-break-inside:avoid;}
 .pdf-card th,.pdf-card td{border:1px solid #ccc;padding:4px 6px;text-align:left;}
-.pdf-card img{max-width:100%;margin:6px 0;border:1px solid #ccc;}
+.pdf-card img{max-width:100%;margin:6px 0;border:1px solid #ccc;page-break-inside:avoid;}
 .pdf-card__link{font-size:11px;margin-top:4px;}
 .pdf-card__link a{color:var(--accent);font-weight:600;text-decoration:none;}
 
