@@ -900,6 +900,14 @@ input[type="file"]{display:none;}
 .card__full .rich h4,.present__content .rich h4{margin-top:10px;}
 .rich :first-child{margin-top:0;}
 .rich :last-child{margin-bottom:0;}
+/* Base size for the wrapper itself: pasted content sometimes lands as bare
+   <div>/<span> lines (common from Word/Google Docs paste) rather than <p>,
+   which would otherwise fall outside the p/li rules below and inherit
+   whichever size happens to be ambient. Setting it here keeps every entry's
+   body text the same standard size regardless of what it was pasted from. */
+.card__full .rich{font-size:14px;line-height:1.6;color:var(--ink-soft);}
+.present__content .rich{font-size:inherit;line-height:inherit;color:inherit;}
+.pdf-card .rich{font-size:12px;line-height:1.5;}
 
 /* Pasted tables live inside a rich block. Keep them inside the column width:
    fixed layout distributes columns evenly and long cell text wraps instead of

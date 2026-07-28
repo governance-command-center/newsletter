@@ -808,7 +808,14 @@ function renderBody(body, forPrint){
    ------------------------------------------------------------------ */
 var RICH_ALLOWED_TAGS = { B:1,STRONG:1,I:1,EM:1,U:1,H4:1,H5:1,UL:1,OL:1,LI:1,P:1,BR:1,A:1,SPAN:1,DIV:1,
   TABLE:1,THEAD:1,TBODY:1,TFOOT:1,TR:1,TD:1,TH:1 };
-var RICH_ALLOWED_STYLES = { 'color':1, 'font-size':1, 'font-weight':1, 'text-decoration':1 };
+// font-size is deliberately NOT in this list. Pasted content (Word, Google Docs,
+// web pages) routinely carries its own inline font sizes, and letting those
+// through made body text render at a different size per entry depending on
+// where it was copied from. Stripping it here forces all body text back onto
+// the app's own standard size, everywhere it's rendered (browse cards, present
+// mode, email export, PDF export) — only semantic emphasis (bold/italic/underline,
+// real <h4> headers) and color survive from pasted formatting.
+var RICH_ALLOWED_STYLES = { 'color':1, 'font-weight':1, 'text-decoration':1 };
 
 function sanitizeRichHtml(html){
   if (!html) return '';
