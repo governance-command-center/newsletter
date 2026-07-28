@@ -486,8 +486,53 @@ var state = {
   digestHtml: null,           // last generated regional digest HTML
   selectedForDelete: new Set(),  // slide ids ticked in the Manage/Delete pane
   editDraft: null,            // in-progress add/edit entry (null until the Add pane builds one)
+  entryDateFilter: '__all__', // Existing-entries list: publish-date filter (for choosing what to archive)
+  emailDateFilter: '__all__', // Generate email: which publish date to include ('__all__' = every date)
   present: { list: [], index: 0, dateFilter: '__all__' }  // presentation session: ordered slides + cursor + publish-date filter
 };
+
+/* Group a list of slides by their publish date (the `date` field). Returns an
+   array of { key, label, count } ordered newest-first, with any undated entries
+   collected under a stable key. Used to build "filter by publish date"
+   dropdowns in the Existing-entries list and the Generate-email pane so both
+   speak the same language. */
+var NO_DATE_KEY = '__nodate__';
+function publishDateGroups(list){
+  var map = {};
+  (list || []).forEach(function(s){
+    var k = s && s.date ? s.date : NO_DATE_KEY;
+    if (!map[k]) map[k] = { key: k, count: 0 };
+    map[k].count++;
+  });
+  return Object.keys(map).sort(function(a, b){
+    if (a === NO_DATE_KEY) return 1;   // undated always last
+    if (b === NO_DATE_KEY) return -1;
+    return b.localeCompare(a);          // newest publish date first
+  }).map(function(k){
+    var g = map[k];
+    g.label = (k === NO_DATE_KEY) ? 'No publish date' : fmtDate(k);
+    return g;
+  });
+}
+// Build <option> markup for a publish-date <select>, with an "All dates" head.
+function publishDateOptionsHtml(list, selected){
+  var groups = publishDateGroups(list);
+  var opts = ['<option value="__all__"'+(selected==='__all__'||!selected?' selected':'')+'>All publish dates ('+(list?list.length:0)+')</option>'];
+  groups.forEach(function(g){
+    opts.push('<option value="'+esc(g.key)+'"'+(selected===g.key?' selected':'')+'>'+esc(g.label)+' ('+g.count+')</option>');
+  });
+  return opts.join('');
+}
+// Filter a slide list down to a single publish-date key (or return it unchanged
+// when the key is the "__all__" sentinel or a date no longer present).
+function slidesByPublishDate(list, key){
+  if (!key || key === '__all__') return list.slice();
+  var out = list.filter(function(s){
+    var k = (s && s.date) ? s.date : NO_DATE_KEY;
+    return k === key;
+  });
+  return out;
+}
 
 var BROWSE_VIEWS = { browse: true };
 function isBrowseNav(nav){ return !!BROWSE_VIEWS[nav]; }
@@ -2417,8 +2462,10 @@ function renderExecPreview(){
 async function generateExecEmail(){
   var scope = currentExecScope();
   var list = scope === 'all' ? slides : filteredSlides();
+  // Narrow to a single publish date when one is chosen in the dropdown.
+  list = slidesByPublishDate(list, state.emailDateFilter);
   if (!list.length){
-    setStatus('Nothing to include — no slides in the selected scope.', false);
+    setStatus('Nothing to include — no slides in the selected scope and publish date.', false);
     return;
   }
 
@@ -2465,10 +2512,12 @@ function blankDraft(){
     id: null,               // null = new; otherwise editing an existing slide
     platform: ALLOWED_PLATFORMS[0] || 'Others',
     region: ALLOWED_REGIONS[0] || '',
+    regions: (ALLOWED_REGIONS[0] ? [ALLOWED_REGIONS[0]] : []), // multi-select set (new entries)
     date: '',
     date_range: '',
     title: '',
     link: '',
+    links: {},              // region -> region-specific URL (used when >1 region chosen)
     body: [{ type:'rich', html:'' }]
   };
 }
@@ -2526,10 +2575,12 @@ function draftFromSlide(s){
     id: s.id,
     platform: s.platform,
     region: s.region,
+    regions: s.region ? [s.region] : [],   // editing targets one slide → one region
     date: s.date || '',
     date_range: s.date_range || '',
     title: s.title || '',
     link: s.link || '',
+    links: (s.region && s.link) ? (function(){ var m={}; m[s.region]=s.link; return m; })() : {},
     body: body.length ? body : [{ type:'rich', html:'' }]
   };
 }
@@ -2618,6 +2669,53 @@ function richEditorHtml(b, i){
   return toolbar + editor;
 }
 
+/* Region field for the Add pane.
+   - New entries: a checkbox multi-select. Ticking 2+ regions creates one entry
+     per region on save, each carrying its own region-specific link.
+   - Editing: a single dropdown (you're editing one existing slide).
+   Reads from d.regions (array). */
+function regionFieldHtml(d, editing){
+  if (editing){
+    return '<div class="formfield"><label>Region</label>'
+      + '<select id="fRegion">'+optionsHtml(ALLOWED_REGIONS, d.region)+'</select>'
+      + '<span class="formfield__hint">Editing one entry — change its region here.</span></div>';
+  }
+  var chosen = Array.isArray(d.regions) ? d.regions : [];
+  var boxes = ALLOWED_REGIONS.map(function(r){
+    var on = chosen.indexOf(r) !== -1;
+    return '<label class="regionchk'+(on?' is-on':'')+'">'
+      + '<input type="checkbox" class="fRegionChk" value="'+esc(r)+'"'+(on?' checked':'')+'>'
+      + '<span>'+esc(r)+'</span></label>';
+  }).join('');
+  return '<div class="formfield formfield--wide"><label>Region(s)</label>'
+    + '<div class="regionmulti" id="fRegionMulti">'+boxes+'</div>'
+    + '<span class="formfield__hint">Tick one or more. Choosing several creates one entry per region — each with its own link below.</span></div>';
+}
+
+/* Link field(s) for the Add pane.
+   - 0 or 1 region chosen (or editing): a single Link / URL field.
+   - 2+ regions chosen: one Link / URL field per selected region, so each
+     region's entry can point at its own localised page. */
+function linkFieldHtml(d, editing){
+  var chosen = editing ? (d.region ? [d.region] : []) : (Array.isArray(d.regions) ? d.regions : []);
+  if (chosen.length > 1){
+    var rows = chosen.map(function(r){
+      var val = (d.links && d.links[r] != null) ? d.links[r] : '';
+      return '<div class="linkrow">'
+        + '<span class="linkrow__region">'+esc(r)+'</span>'
+        + '<input type="url" class="fLinkRegion" data-region="'+esc(r)+'" value="'+esc(val)+'" placeholder="https://… (link for '+esc(r)+')">'
+      + '</div>';
+    }).join('');
+    return '<div class="formfield formfield--wide" id="fLinkWrap"><label>Region-specific link / URL (optional)</label>'
+      + '<div class="linkmulti">'+rows+'</div>'
+      + '<span class="formfield__hint">Each region\'s entry uses its own link. Leave any blank to omit that region\'s link.</span></div>';
+  }
+  var only = chosen[0];
+  var single = only && d.links && d.links[only] != null ? d.links[only] : d.link;
+  return '<div class="formfield formfield--wide" id="fLinkWrap"><label>Link / URL (optional)</label>'
+    + '<input type="url" id="fLink" value="'+esc(single||'')+'" placeholder="https://…"></div>';
+}
+
 function renderAddPane(wrap){
   if (!state.editDraft) state.editDraft = blankDraft();
   var d = state.editDraft;
@@ -2627,8 +2725,17 @@ function renderAddPane(wrap){
     ? d.body.map(detailBlockHtml).join('')
     : '<div class="detailblock__empty" style="padding:14px;text-align:center;">No details yet — add a text block or image below. You can paste tables directly into a text block.</div>';
 
-  // Existing entries list (edit/delete + select-to-archive)
-  var listRows = slides.slice().sort(function(a,b){
+  // Existing entries list (edit/delete + select-to-archive). The publish-date
+  // filter narrows which entries show, so you can archive one date's batch
+  // without hunting through the whole table.
+  var entryFilter = state.entryDateFilter || '__all__';
+  // If the chosen date no longer exists (e.g. after archiving it), fall back.
+  if (entryFilter !== '__all__' && !slides.some(function(s){
+        var k = s.date ? s.date : NO_DATE_KEY; return k === entryFilter; })){
+    entryFilter = state.entryDateFilter = '__all__';
+  }
+  var visibleSlides = slidesByPublishDate(slides, entryFilter);
+  var listRows = visibleSlides.slice().sort(function(a,b){
     return (b.date||'').localeCompare(a.date||'') || (a.title||'').localeCompare(b.title||'');
   }).map(function(s){
     return '<tr>'
@@ -2653,11 +2760,11 @@ function renderAddPane(wrap){
 
       + '<div class="formgrid">'
         + '<div class="formfield"><label>Platform</label><select id="fPlatform">'+optionsHtml(ALLOWED_PLATFORMS, d.platform)+'</select></div>'
-        + '<div class="formfield"><label>Region</label><select id="fRegion">'+optionsHtml(ALLOWED_REGIONS, d.region)+'</select></div>'
+        + regionFieldHtml(d, editing)
         + '<div class="formfield"><label>Publish date</label><input type="date" id="fDate" value="'+esc(d.date)+'"><span class="formfield__hint">Drives sorting, filtering and the presentation grouping.</span></div>'
         + '<div class="formfield"><label>Period covered — label (optional)</label><input type="text" id="fRange" value="'+esc(d.date_range)+'" placeholder="e.g. Jun 29 – Jul 3"><span class="formfield__hint">Display text shown on the entry; free-form.</span></div>'
         + '<div class="formfield formfield--wide"><label>Title</label><input type="text" id="fTitle" value="'+esc(d.title)+'" placeholder="Headline for this update"></div>'
-        + '<div class="formfield formfield--wide"><label>Link / URL (optional)</label><input type="url" id="fLink" value="'+esc(d.link)+'" placeholder="https://…"></div>'
+        + linkFieldHtml(d, editing)
       + '</div>'
 
       + '<div class="detailhead">'
@@ -2685,15 +2792,22 @@ function renderAddPane(wrap){
 
     + '<div class="panel">'
       + '<div class="panel__head"><h2 class="panel__title">Existing entries ('+slides.length+')</h2></div>'
-      + '<p class="panel__hint">Edit or remove any entry. Tick entries and use <strong>Archive selected</strong> to set them aside — archived entries leave the browse, presentation and email/PDF views but can be restored anytime from the Archive tab. Saved to this browser.</p>'
+      + '<p class="panel__hint">Edit or remove any entry. Filter by <strong>publish date</strong> to isolate one batch, then tick entries and use <strong>Archive selected</strong> to set them aside — archived entries leave the browse, presentation and email/PDF views but can be restored anytime from the Archive tab. Saved to this browser.</p>'
       + (slides.length
-        ? '<div class="archivebar">'
-            + '<label class="archivebar__all"><input type="checkbox" id="archiveSelectAll"> Select all</label>'
+        ? '<div class="datefilterbar">'
+            + '<label class="datefilterbar__label" for="entryDateFilter">Filter by publish date</label>'
+            + '<select id="entryDateFilter" class="datefilterbar__select">'+publishDateOptionsHtml(slides, entryFilter)+'</select>'
+            + '<span class="datefilterbar__count">Showing '+visibleSlides.length+' of '+slides.length+'</span>'
+          + '</div>'
+          + '<div class="archivebar">'
+            + '<label class="archivebar__all"><input type="checkbox" id="archiveSelectAll"> Select all'+(entryFilter!=='__all__'?' shown':'')+'</label>'
             + '<span class="archivebar__count" id="archiveCount">0 selected</span>'
             + '<div class="formactions__spacer"></div>'
             + '<button type="button" class="btn" id="archiveSelectedBtn" disabled>Archive selected</button>'
           + '</div>'
-          + '<table class="entrytable"><thead><tr><th class="entrytable__check"></th><th>Title</th><th>Platform</th><th>Region</th><th>Publish date</th><th>Added by</th><th>Timestamp</th><th></th></tr></thead><tbody>'+listRows+'</tbody></table>'
+          + (listRows
+            ? '<table class="entrytable"><thead><tr><th class="entrytable__check"></th><th>Title</th><th>Platform</th><th>Region</th><th>Publish date</th><th>Added by</th><th>Timestamp</th><th></th></tr></thead><tbody>'+listRows+'</tbody></table>'
+            : '<div class="detailblock__empty">No entries with this publish date.</div>')
         : '<div class="detailblock__empty">No entries yet.</div>')
     + '</div>';
 
@@ -2706,11 +2820,38 @@ function syncDraftFromForm(){
   var d = state.editDraft; if (!d) return;
   var g = function(id){ var el = document.getElementById(id); return el ? el.value : ''; };
   d.platform = g('fPlatform') || d.platform;
-  d.region = g('fRegion') || d.region;
   d.date = g('fDate');
   d.date_range = g('fRange');
   d.title = g('fTitle');
-  d.link = g('fLink');
+
+  // --- Region(s): dropdown when editing, checkbox multi-select when adding ---
+  var singleRegion = document.getElementById('fRegion');
+  if (singleRegion){                 // editing an existing entry
+    d.region = singleRegion.value || d.region;
+    d.regions = d.region ? [d.region] : [];
+  } else {                           // adding — read the checkbox group
+    var chosen = Array.prototype.slice
+      .call(document.querySelectorAll('.fRegionChk'))
+      .filter(function(c){ return c.checked; })
+      .map(function(c){ return c.value; });
+    d.regions = chosen;
+    d.region = chosen[0] || '';      // primary region (single-region path / fallback)
+  }
+
+  // --- Link(s): per-region fields when >1 region, else the single field ---
+  if (!d.links || typeof d.links !== 'object') d.links = {};
+  var perRegion = document.querySelectorAll('.fLinkRegion');
+  if (perRegion.length){
+    perRegion.forEach(function(inp){
+      var r = inp.getAttribute('data-region');
+      if (r) d.links[r] = inp.value;
+    });
+    // keep d.link meaningful for the primary region
+    d.link = (d.region && d.links[d.region] != null) ? d.links[d.region] : (d.link || '');
+  } else {
+    d.link = g('fLink');
+    if (d.region) d.links[d.region] = d.link;
+  }
 
   // rich contenteditable blocks -> sanitised HTML
   document.querySelectorAll('#detailBlocks .rtb__editor').forEach(function(ed){
@@ -2734,6 +2875,20 @@ function wireAddPane(wrap){
   ['fPlatform','fRegion','fDate','fRange','fTitle','fLink'].forEach(function(id){
     var el = document.getElementById(id); if (!el) return;
     el.addEventListener('input', function(){ syncDraftFromForm(); });
+  });
+
+  // region multi-select (Add mode): ticking a box may add/remove per-region
+  // link fields, so capture current input then re-render the pane.
+  wrap.querySelectorAll('.fRegionChk').forEach(function(chk){
+    chk.addEventListener('change', function(){
+      syncDraftFromForm();
+      renderAddPane(wrap);
+    });
+  });
+
+  // per-region link fields (shown when >1 region chosen)
+  wrap.querySelectorAll('.fLinkRegion').forEach(function(inp){
+    inp.addEventListener('input', function(){ syncDraftFromForm(); });
   });
 
   // add a detail block
@@ -2877,6 +3032,15 @@ function wireAddPane(wrap){
     });
   });
 
+  // --- publish-date filter for the existing-entries list ---
+  var entryDateFilter = document.getElementById('entryDateFilter');
+  if (entryDateFilter){
+    entryDateFilter.addEventListener('change', function(){
+      state.entryDateFilter = entryDateFilter.value || '__all__';
+      renderAddPane(wrap); // re-render the list (and reset the tick selection)
+    });
+  }
+
   // --- archive selection ---
   var checks = wrap.querySelectorAll('.archiveCheck');
   var selectAll = document.getElementById('archiveSelectAll');
@@ -2968,7 +3132,10 @@ function saveEntry(wrap){
     setStatus('Hold on — an image is still uploading. Try again in a moment.', false); return;
   }
   if (!d.title.trim()){ setStatus('Give the entry a title before saving.', false); return; }
-  if (!d.region){ setStatus('Pick a region.', false); return; }
+  var regions = (!d.id && Array.isArray(d.regions) && d.regions.length)
+    ? d.regions.slice()
+    : (d.region ? [d.region] : []);
+  if (!regions.length){ setStatus('Pick at least one region.', false); return; }
   if (d.date && !/^\d{4}-\d{2}-\d{2}$/.test(d.date)){ setStatus('Date must be a valid calendar date.', false); return; }
 
   // clean up body: drop empty rich blocks, empty table rows, imageless image blocks
@@ -2989,21 +3156,38 @@ function saveEntry(wrap){
 
   if (!body.length){ setStatus('Add at least one detail — a text block, image or table.', false); return; }
 
-  var payload = {
-    platform: normalizePlatform(d.platform),
-    region: d.region,
-    date: d.date || '',
-    date_range: d.date_range.trim(),
-    title: d.title.trim(),
-    link: d.link.trim(),
-    body: body
-  };
+  // Resolve the link for a given region: prefer its region-specific value, then
+  // fall back to the single link field.
+  function linkFor(region){
+    var v = (d.links && d.links[region] != null && String(d.links[region]).trim() !== '')
+      ? d.links[region] : d.link;
+    return String(v || '').trim();
+  }
+  // Deep-ish copy of the cleaned body so multiple region entries don't share
+  // the same block objects (avoids one edit later mutating all of them).
+  function cloneBody(){
+    return body.map(function(b){
+      if (b.type === 'table') return { type:'table', rows: b.rows.map(function(r){ return r.slice(); }) };
+      if (b.type === 'image') return { type:'image', file:b.file||'', dataUrl:b.dataUrl||null };
+      return { type:'rich', html: b.html };
+    });
+  }
 
   var who = (AUTH.getSession() && AUTH.getSession().username) || 'unknown';
   var now = Date.now();
 
   if (d.id){
-    // update in place — preserve original author/created stamp, add edit stamp
+    // Editing: always a single entry with a single region.
+    var region = regions[0];
+    var payload = {
+      platform: normalizePlatform(d.platform),
+      region: region,
+      date: d.date || '',
+      date_range: d.date_range.trim(),
+      title: d.title.trim(),
+      link: linkFor(region),
+      body: cloneBody()
+    };
     var idx = slides.findIndex(function(s){ return s.id === d.id; });
     if (idx !== -1){
       var prev = slides[idx];
@@ -3017,14 +3201,30 @@ function saveEntry(wrap){
     }
     setStatus('Saved changes to "'+payload.title+'".', true);
   } else {
-    payload.id = nextId();
-    payload.slide_num = nextSlideNum();
-    payload.createdBy = who;
-    payload.createdAt = now;
-    payload.updatedBy = who;
-    payload.updatedAt = now;
-    slides.push(payload);
-    setStatus('Added "'+payload.title+'". '+slides.length+' entries total.', true);
+    // Adding: one entry per selected region, each with its own link.
+    regions.forEach(function(region){
+      var payload = {
+        platform: normalizePlatform(d.platform),
+        region: region,
+        date: d.date || '',
+        date_range: d.date_range.trim(),
+        title: d.title.trim(),
+        link: linkFor(region),
+        body: cloneBody()
+      };
+      payload.id = nextId();
+      payload.slide_num = nextSlideNum();
+      payload.createdBy = who;
+      payload.createdAt = now;
+      payload.updatedBy = who;
+      payload.updatedAt = now;
+      slides.push(payload);
+    });
+    if (regions.length === 1){
+      setStatus('Added "'+d.title.trim()+'". '+slides.length+' entries total.', true);
+    } else {
+      setStatus('Added "'+d.title.trim()+'" for '+regions.length+' regions ('+regions.join(', ')+'). '+slides.length+' entries total.', true);
+    }
   }
 
   state.execHtml = null; state.digestHtml = null;
@@ -3593,6 +3793,11 @@ function renderEmailPane(wrap){
         + '<label><input type="radio" name="execScope" value="filtered" checked> Current filtered view ('+filteredSlides().length+')</label>'
         + '<label><input type="radio" name="execScope" value="all"> All slides ('+slides.length+')</label>'
       + '</div>'
+      + '<div class="datefilterbar">'
+        + '<label class="datefilterbar__label" for="emailDateFilter">Publish date to include</label>'
+        + '<select id="emailDateFilter" class="datefilterbar__select"></select>'
+        + '<span class="datefilterbar__count" id="emailDateCount"></span>'
+      + '</div>'
       + '<div class="fieldrow">'
         + '<label style="flex:1;min-width:240px;">Base URL (optional — makes thumbnails & button clickable)<input type="text" id="emailBaseUrlExec" placeholder="https://yourteam.github.io/platform-updates/" value="'+esc(state.emailBaseUrl)+'"></label>'
       + '</div>'
@@ -3601,6 +3806,31 @@ function renderEmailPane(wrap){
       + '</div>'
       + '<div id="execPreviewWrap"></div>'
     + '</div>';
+
+  // Populate the publish-date dropdown from whatever scope is currently chosen,
+  // and keep it in sync when the scope radios change.
+  var dateSel = document.getElementById('emailDateFilter');
+  var dateCount = document.getElementById('emailDateCount');
+  function scopeList(){ return currentExecScope() === 'all' ? slides : filteredSlides(); }
+  function refreshEmailDates(){
+    var list = scopeList();
+    // Drop a stale date selection that isn't in the current scope.
+    if (state.emailDateFilter !== '__all__' && !list.some(function(s){
+          var k = s.date ? s.date : NO_DATE_KEY; return k === state.emailDateFilter; })){
+      state.emailDateFilter = '__all__';
+    }
+    dateSel.innerHTML = publishDateOptionsHtml(list, state.emailDateFilter);
+    var n = slidesByPublishDate(list, state.emailDateFilter).length;
+    if (dateCount) dateCount.textContent = n + ' update' + (n === 1 ? '' : 's') + ' will be included';
+  }
+  refreshEmailDates();
+  dateSel.addEventListener('change', function(){
+    state.emailDateFilter = dateSel.value || '__all__';
+    refreshEmailDates();
+  });
+  wrap.querySelectorAll('input[name="execScope"]').forEach(function(r){
+    r.addEventListener('change', refreshEmailDates);
+  });
 
   document.getElementById('emailBaseUrlExec').addEventListener('input', function(e){ state.emailBaseUrl = e.target.value; });
   document.getElementById('execGenerateBtn').addEventListener('click', generateExecEmail);

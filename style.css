@@ -678,6 +678,39 @@ input[type="file"]{display:none;}
 }
 .formfield__hint{font-size:11px;color:var(--muted);}
 
+/* Region multi-select (Add pane) */
+.regionmulti{
+  display:flex;flex-wrap:wrap;gap:8px;
+}
+.regionchk{
+  display:inline-flex;align-items:center;gap:7px;cursor:pointer;
+  border:1px solid var(--line-strong);border-radius:999px;
+  padding:7px 13px;font-size:13px;font-family:var(--body);color:var(--ink);
+  background:#fff;user-select:none;transition:background .12s,border-color .12s;
+}
+.regionchk:hover{border-color:var(--accent);}
+.regionchk input{width:15px;height:15px;cursor:pointer;accent-color:var(--accent);margin:0;}
+.regionchk.is-on{background:var(--accent-soft);border-color:var(--accent);color:var(--ink);font-weight:600;}
+
+/* Per-region link fields (shown when >1 region chosen) */
+.linkmulti{display:flex;flex-direction:column;gap:8px;}
+.linkrow{display:flex;align-items:center;gap:10px;}
+.linkrow__region{
+  flex:0 0 108px;font-size:11.5px;font-family:var(--mono);color:var(--ink-soft);
+  letter-spacing:.02em;text-align:right;
+}
+.linkrow input[type="url"]{
+  flex:1 1 auto;border:1px solid var(--line-strong);border-radius:var(--radius-sm);
+  padding:9px 11px;font-size:13px;font-family:var(--body);color:var(--ink);background:#fff;
+}
+.linkrow input[type="url"]:focus{
+  outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);
+}
+@media (max-width:560px){
+  .linkrow{flex-direction:column;align-items:stretch;gap:4px;}
+  .linkrow__region{text-align:left;flex-basis:auto;}
+}
+
 .detailhead{
   display:flex;align-items:center;justify-content:space-between;gap:10px;
   margin:6px 0 10px;
@@ -946,6 +979,20 @@ input[type="file"]{display:none;}
 .archivebar__all{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink-soft);cursor:pointer;}
 .archivebar__all input{width:16px;height:16px;cursor:pointer;accent-color:var(--accent);}
 .archivebar__count{font-family:var(--mono);font-size:11.5px;color:var(--muted);}
+
+.datefilterbar{
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  padding:10px 12px;background:var(--canvas);border:1px solid var(--line);
+  border-radius:var(--radius-sm);margin-bottom:12px;
+}
+.datefilterbar__label{font-size:12.5px;font-weight:600;color:var(--ink-soft);}
+.datefilterbar__select{
+  padding:7px 10px;font-size:13px;font-family:inherit;color:var(--ink);
+  background:var(--surface,#fff);border:1px solid var(--line-strong,var(--line));
+  border-radius:var(--radius-sm);min-width:200px;cursor:pointer;
+}
+.datefilterbar__select:focus{outline:2px solid var(--accent);outline-offset:1px;}
+.datefilterbar__count{font-family:var(--mono);font-size:11.5px;color:var(--muted);}
 
 .btnsm{padding:6px 12px !important;font-size:12px !important;}
 
