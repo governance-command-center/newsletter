@@ -3022,10 +3022,11 @@ function richEditorHtml(b, i){
 }
 
 /* Region field for the Add pane.
-   - New entries: a checkbox multi-select. Ticking 2+ regions creates one entry
-     per region on save, each carrying its own region-specific link.
-   - Editing: a single dropdown (you're editing one existing slide).
-   Reads from d.regions (array). */
+   A checkbox multi-select, used identically for new AND existing entries.
+   Ticking 2+ regions keeps everything in ONE entry (never split): the entry
+   carries a regions[] array plus a per-region links{} map. When editing, the
+   entry's saved regions come back with each one ticked, and one link field per
+   region is shown below. Reads from d.regions (array). */
 function regionFieldHtml(d, editing){
   var chosen = Array.isArray(d.regions) ? d.regions : (d.region ? [d.region] : []);
   var boxes = ALLOWED_REGIONS.map(function(r){
@@ -3039,10 +3040,11 @@ function regionFieldHtml(d, editing){
     + '<span class="formfield__hint">Tick one or more. A single entry can cover several regions — each region gets its own link below.</span></div>';
 }
 
-/* Link field(s) for the Add pane.
+/* Link field(s) for the Add pane. Applies the same in add and edit mode.
    - 1 region chosen: a single Link / URL field.
    - 2+ regions chosen: one Link / URL field per selected region, so each
-     region can point at its own localised page — all within ONE entry. */
+     region can point at its own localised page — all within ONE entry.
+   So editing a 2-region entry shows 2 URL fields with the other fields shared. */
 function linkFieldHtml(d, editing){
   var chosen = Array.isArray(d.regions) ? d.regions : (d.region ? [d.region] : []);
   if (chosen.length > 1){
