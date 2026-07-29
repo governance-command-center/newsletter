@@ -491,6 +491,7 @@ var state = {
   editDraft: null,            // in-progress add/edit entry (null until the Add pane builds one)
   entryDateFilter: '__all__', // Existing-entries list: publish-date filter (for choosing what to archive)
   emailDateFilter: '__all__', // Generate email: which publish date to include ('__all__' = every date)
+  exportDateFilter: '__all__', // Export slides: which publish date to include ('__all__' = every date)
   present: { list: [], index: 0, dateFilter: '__all__' }  // presentation session: ordered slides + cursor + publish-date filter
 };
 
@@ -1780,6 +1781,7 @@ function currentExportScope(){
 function exportJson(listArg, labelArg){
   var scope = currentExportScope();
   var list = listArg || (scope === 'filtered' ? filteredSlides() : slides);
+  if (!listArg) list = slidesByPublishDate(list, state.exportDateFilter);
   if (!list.length){ setStatus('Nothing to export — the current selection has no slides.', false); return; }
   var stamp = new Date().toISOString().slice(0,10);
   var payload = {
@@ -1803,6 +1805,7 @@ function exportJson(listArg, labelArg){
 function exportEmailHtml(listArg, labelArg){
   var scope = currentExportScope();
   var list = listArg || (scope === 'filtered' ? filteredSlides() : slides);
+  if (!listArg) list = slidesByPublishDate(list, state.exportDateFilter);
   if (!list.length){ setStatus('Nothing to export — the current selection has no slides.', false); return; }
 
   var baseUrl = state.emailBaseUrl || '';
@@ -1830,11 +1833,22 @@ function buildPrintDoc(list, titleLabel){
     var groupClass = 'pdf-group' + (gi === 0 ? ' pdf-group--first' : '');
     html += '<div class="'+groupClass+'"><h2 class="pdf-group__title">'+esc(k)+'</h2>';
     g.groups[k].forEach(function(s){
+      var pdfRegs = entryRegions(s);
+      var pdfLinks = entryLinks(s);
+      var pdfLinkHtml = '';
+      if (pdfRegs.length > 1){
+        pdfLinkHtml = pdfRegs.map(function(r){
+          var u = pdfLinks[r];
+          return u ? '<div class="pdf-card__link"><a href="'+esc(u)+'">'+esc(r)+' \u2197</a><div class="pdf-card__url">'+esc(u)+'</div></div>' : '';
+        }).join('');
+      } else if (s.link){
+        pdfLinkHtml = '<div class="pdf-card__link"><a href="'+esc(s.link)+'">Read more \u2197</a><div class="pdf-card__url">'+esc(s.link)+'</div></div>';
+      }
       html += '<div class="pdf-card">'
         + '<h3 class="pdf-card__title">'+esc(s.title)+'</h3>'
-        + '<div class="pdf-card__meta">'+esc(s.platform)+' · '+esc(s.region)+(s.date ? ' · '+esc(fmtDate(s.date)) : '')+'</div>'
+        + '<div class="pdf-card__meta">'+esc(s.platform)+' · '+esc(pdfRegs.join(', '))+(s.date ? ' · '+esc(fmtDate(s.date)) : '')+'</div>'
         + renderBody(s.body, true)
-        + (s.link ? '<div class="pdf-card__link"><a href="'+esc(s.link)+'">Read more \u2197</a><div class="pdf-card__url">'+esc(s.link)+'</div></div>' : '')
+        + pdfLinkHtml
       + '</div>';
     });
     html += '</div>';
@@ -1847,6 +1861,7 @@ function buildPrintDoc(list, titleLabel){
 function exportPdf(listArg, labelArg){
   var scope = currentExportScope();
   var list = listArg || (scope === 'filtered' ? filteredSlides() : slides);
+  if (!listArg) list = slidesByPublishDate(list, state.exportDateFilter);
   if (!list.length){ setStatus('Nothing to export — the current selection has no slides.', false); return; }
 
   // Preferred path: build a real vector PDF with genuine, clickable link
@@ -2304,10 +2319,7 @@ function buildEmailHtml(list, opts){
     var items = groups[k];
     var rows = items.map(function(s){
       var accent = PLATFORM_BADGE_COLOR[s.platform] || '#1b2a4a';
-      var linkEl = s.link
-        ? '<a href="'+esc(s.link)+'" style="font-size:13px;font-weight:bold;color:#111111;text-decoration:none;">'
-            + '<font color="#111111" style="color:#111111;">Read more &#8594;</font></a>'
-        : '';
+      var linkEl = emailLinkRow(s);
 
       // No inline expander. <details> is ignored by Outlook, which renders the
       // summary label as dead text and dumps the whole body out beneath it —
@@ -2602,18 +2614,43 @@ function platformBadge(platform, size){
 // the reliable one; the CSS covers every other client.
 function platformRegionMeta(s){
   var color = PLATFORM_BADGE_COLOR[s.platform] || '#1b2a4a';
+  // List EVERY region the entry covers (e.g. "Malaysia, Singapore"), not just
+  // the primary one, so multi-region entries read correctly in the email header.
+  var regionLabel = entryRegions(s).map(esc).join(', ');
   return '<font color="' + color + '" style="color:' + color + ';">'
       + '<span style="color:' + color + ';font-weight:bold;text-transform:uppercase;letter-spacing:.06em;">' + esc(s.platform) + '</span>'
     + '</font>'
     + '<font color="#c3cad3" style="color:#c3cad3;">&nbsp;|&nbsp;</font>'
     + '<font color="#2d3748" style="color:#2d3748;">'
-      + '<span style="color:#2d3748;font-weight:bold;">' + esc(s.region) + '</span>'
+      + '<span style="color:#2d3748;font-weight:bold;">' + regionLabel + '</span>'
     + '</font>'
     + (s.date
         ? '<font color="#8f9aa8" style="color:#8f9aa8;">'
             + '<span style="color:#8f9aa8;font-weight:normal;">&nbsp;&middot;&nbsp;' + esc(fmtDate(s.date)) + '</span>'
           + '</font>'
         : '');
+}
+
+// Build the "Read more" link cell for an email row. For a single-region entry
+// this is one link; for a multi-region entry it renders one labelled link per
+// region (using each region's own URL from s.links) so no region's source is
+// dropped. Falls back to the primary s.link when a per-region link is missing.
+function emailLinkRow(s){
+  var regs = entryRegions(s);
+  var links = entryLinks(s);
+  if (regs.length > 1){
+    var parts = regs.map(function(r){
+      var u = links[r] || (r === (s.region || regs[0]) ? s.link : '');
+      if (!u) return '';
+      return '<a href="' + esc(u) + '" style="display:inline-block;font-size:13px;color:#111111;text-decoration:none;font-weight:bold;margin:0 16px 4px 0;">'
+        + '<font color="#111111" style="color:#111111;">' + esc(r) + ' &#8594;</font></a>';
+    }).filter(Boolean).join('');
+    if (parts) return parts;
+  }
+  return s.link
+    ? '<a href="' + esc(s.link) + '" style="display:inline-block;font-size:13px;color:#111111;text-decoration:none;font-weight:bold;">'
+        + '<font color="#111111" style="color:#111111;">Read more &#8594;</font></a>'
+    : '';
 }
 
 function buildExecEmailHtml(list, criticalList, opts){
@@ -2644,10 +2681,7 @@ function buildExecEmailHtml(list, criticalList, opts){
 
   var criticalHtml = criticalList.map(function(s, i){
     var accent = PLATFORM_BADGE_COLOR[s.platform] || '#1b2a4a';
-    var linkEl = s.link
-      ? '<a href="' + esc(s.link) + '" style="display:inline-block;font-size:13px;color:#111111;text-decoration:none;font-weight:bold;">'
-          + '<font color="#111111" style="color:#111111;">Read more &#8594;</font></a>'
-      : '';
+    var linkEl = emailLinkRow(s);
 
     // Every row uses the lettered, platform-coloured badge — no image thumbnails.
     // Screenshots read as an unreadable smudge at this size, and inline images
@@ -4038,6 +4072,11 @@ function renderExportPane(wrap){
         + '<label><input type="radio" name="exportScope" value="filtered" checked> Current filtered view ('+filteredSlides().length+')</label>'
         + '<label><input type="radio" name="exportScope" value="all"> All slides ('+slides.length+')</label>'
       + '</div>'
+      + '<div class="datefilterbar">'
+        + '<label class="datefilterbar__label" for="exportDateFilter">Publish date to include</label>'
+        + '<select id="exportDateFilter" class="datefilterbar__select"></select>'
+        + '<span class="datefilterbar__count" id="exportDateCount"></span>'
+      + '</div>'
       + '<div class="adminpanel__row">'
         + '<button type="button" class="btn" id="exportEmailBtn">Export as Email (HTML)</button>'
         + '<button type="button" class="btn btn--ghost" id="exportPdfBtn">Export as PDF</button>'
@@ -4086,6 +4125,30 @@ function renderExportPane(wrap){
   document.getElementById('exportEmailBtn').addEventListener('click', function(){ exportEmailHtml(); });
   document.getElementById('exportPdfBtn').addEventListener('click', function(){ exportPdf(); });
   document.getElementById('exportJsonBtn').addEventListener('click', function(){ exportJson(); });
+
+  // Publish-date filter for exports — populated from the chosen scope and kept
+  // in sync when the scope radios change, mirroring the Generate email pane.
+  var expDateSel = document.getElementById('exportDateFilter');
+  var expDateCount = document.getElementById('exportDateCount');
+  function exportScopeList(){ return currentExportScope() === 'all' ? slides : filteredSlides(); }
+  function refreshExportDates(){
+    var list = exportScopeList();
+    if (state.exportDateFilter !== '__all__' && !list.some(function(s){
+          var k = s.date ? s.date : NO_DATE_KEY; return k === state.exportDateFilter; })){
+      state.exportDateFilter = '__all__';
+    }
+    expDateSel.innerHTML = publishDateOptionsHtml(list, state.exportDateFilter);
+    var n = slidesByPublishDate(list, state.exportDateFilter).length;
+    if (expDateCount) expDateCount.textContent = n + ' update' + (n === 1 ? '' : 's') + ' will be exported';
+  }
+  refreshExportDates();
+  expDateSel.addEventListener('change', function(){
+    state.exportDateFilter = expDateSel.value || '__all__';
+    refreshExportDates();
+  });
+  wrap.querySelectorAll('input[name="exportScope"]').forEach(function(r){
+    r.addEventListener('change', refreshExportDates);
+  });
 
   function refreshCount(){
     var el = document.getElementById('delCount');
