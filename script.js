@@ -660,12 +660,13 @@ function weekMultiSelectHtml(list, selected, namePrefix){
   if (!groups.length) return '<div class="weekfilter__empty">No weeks to filter.</div>';
   var sel = selected || [];
   var allActive = !sel.length || sel.indexOf('__all__') !== -1;
-  var items = groups.map(function(g){
+  var items = groups.map(function(g, idx){
     var on = !allActive && sel.indexOf(g.key) !== -1;
-    return '<label class="weekfilter__chip'+(on?' is-on':'')+'">'
-      + '<input type="checkbox" class="'+namePrefix+'WeekChk" value="'+esc(g.key)+'"'+(on?' checked':'')+'>'
-      + '<span>'+esc(g.label)+' ('+g.count+')</span>'
-    + '</label>';
+    var id = namePrefix + 'WeekChk_' + idx;
+    return '<span class="weekfilter__chip'+(on?' is-on':'')+'">'
+      + '<input type="checkbox" id="'+id+'" class="'+namePrefix+'WeekChk" value="'+esc(g.key)+'"'+(on?' checked':'')+'>'
+      + '<label for="'+id+'">'+esc(g.label)+' ('+g.count+')</label>'
+    + '</span>';
   }).join('');
   return '<div class="weekfilter">'
     + '<div class="weekfilter__head">'
@@ -3705,27 +3706,25 @@ function wireAddPane(wrap){
     });
   }
 
-  // --- week multi-select (existing entries) ---
-  wrap.querySelectorAll('.entryWeekChk').forEach(function(chk){
-    chk.addEventListener('change', function(){
+  // --- week multi-select (existing entries) — delegated so it survives
+  //     re-renders and never depends on per-node binding timing. ---
+  if (!wrap.__weekDelegated){
+    wrap.__weekDelegated = true;
+    wrap.addEventListener('change', function(e){
+      var chk = e.target.closest ? e.target.closest('.entryWeekChk') : null;
+      if (!chk) return;
       var cur = new Set(state.entryWeekFilter || []);
       if (chk.checked) cur.add(chk.value); else cur.delete(chk.value);
       state.entryWeekFilter = Array.prototype.slice.call(cur);
       renderAddPane(wrap);
     });
-  });
-  var entryWeekAll = wrap.querySelector('[data-week-all="entry"]');
-  if (entryWeekAll) entryWeekAll.addEventListener('click', function(){
-    state.entryWeekFilter = [];
-    renderAddPane(wrap);
-  });
-  var entryWeekNone = wrap.querySelector('[data-week-none="entry"]');
-  if (entryWeekNone) entryWeekNone.addEventListener('click', function(){
-    // "Clear" = show nothing until a week is picked; use a sentinel empty-match.
-    // Simpler UX: clearing selects no weeks -> treat as all. So Clear resets to all.
-    state.entryWeekFilter = [];
-    renderAddPane(wrap);
-  });
+    wrap.addEventListener('click', function(e){
+      var t = e.target.closest ? e.target.closest('[data-week-all="entry"],[data-week-none="entry"]') : null;
+      if (!t) return;
+      state.entryWeekFilter = [];
+      renderAddPane(wrap);
+    });
+  }
 
   // --- archive selection ---
   var checks = wrap.querySelectorAll('.archiveCheck');
@@ -4300,24 +4299,23 @@ function renderArchivePane(wrap){
     state.archivePeriodFilter = periodSel.value || '__all__';
     renderArchivePane(wrap);
   });
-  wrap.querySelectorAll('.archiveWeekChk').forEach(function(chk){
-    chk.addEventListener('change', function(){
+  if (!wrap.__archiveWeekDelegated){
+    wrap.__archiveWeekDelegated = true;
+    wrap.addEventListener('change', function(e){
+      var chk = e.target.closest ? e.target.closest('.archiveWeekChk') : null;
+      if (!chk) return;
       var cur = new Set(state.archiveWeekFilter || []);
       if (chk.checked) cur.add(chk.value); else cur.delete(chk.value);
       state.archiveWeekFilter = Array.prototype.slice.call(cur);
       renderArchivePane(wrap);
     });
-  });
-  var archWeekAll = wrap.querySelector('[data-week-all="archive"]');
-  if (archWeekAll) archWeekAll.addEventListener('click', function(){
-    state.archiveWeekFilter = [];
-    renderArchivePane(wrap);
-  });
-  var archWeekNone = wrap.querySelector('[data-week-none="archive"]');
-  if (archWeekNone) archWeekNone.addEventListener('click', function(){
-    state.archiveWeekFilter = [];
-    renderArchivePane(wrap);
-  });
+    wrap.addEventListener('click', function(e){
+      var t = e.target.closest ? e.target.closest('[data-week-all="archive"],[data-week-none="archive"]') : null;
+      if (!t) return;
+      state.archiveWeekFilter = [];
+      renderArchivePane(wrap);
+    });
+  }
 
   wireArchivePane(wrap);
 }
