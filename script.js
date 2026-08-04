@@ -490,8 +490,10 @@ var state = {
   selectedForDelete: new Set(),  // slide ids ticked in the Manage/Delete pane
   editDraft: null,            // in-progress add/edit entry (null until the Add pane builds one)
   entryDateFilter: '__all__', // Existing-entries list: input-date filter (for choosing what to archive)
-  emailDateFilter: '__all__', // Generate email: which publish date to include ('__all__' = every date)
-  exportDateFilter: '__all__', // Export slides: which publish date to include ('__all__' = every date)
+  entryWeekFilter: [],        // Existing-entries: multi-week selection (empty = all weeks)
+  archiveWeekFilter: [],      // Archive: multi-week selection (empty = all weeks)
+  emailDateFilter: '__all__', // Generate email: which input date to include ('__all__' = every date)
+  exportDateFilter: '__all__', // Export slides: which input date to include ('__all__' = every date)
   archiveGranularity: 'month', // Archive filter granularity: 'month' | 'quarter' | 'year'
   archivePeriodFilter: '__all__', // Archive: which period to show ('__all__' = every period)
   present: { list: [], index: 0, dateFilter: '__all__' }  // presentation session: ordered slides + cursor + publish-date filter
@@ -575,6 +577,103 @@ function slidesByInputDate(list, key){
     var k = (s && s.input_date) ? s.input_date : NO_INPUT_DATE_KEY;
     return k === key;
   });
+}
+
+/* ---- Weekly bucketing (ISO week, Monday-based) for a multi-week filter. ----
+   Each entry's input date maps to a week key "YYYY-Www". A stable key lets us
+   support selecting several weeks at once. Undated entries fall into a
+   dedicated "no input date" bucket. */
+var NO_WEEK_KEY = '__noweek__';
+function isoWeekParts(iso){
+  // Returns { year, week, monday(YYYY-MM-DD), sunday(YYYY-MM-DD) } for an ISO date.
+  var d = new Date(iso + 'T00:00:00');
+  if (isNaN(d.getTime())) return null;
+  // ISO week date: Thursday-based year assignment.
+  var tmp = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  var day = tmp.getUTCDay() || 7;              // Sun=7
+  tmp.setUTCDate(tmp.getUTCDate() + 4 - day);  // move to Thursday of this week
+  var isoYear = tmp.getUTCFullYear();
+  var yearStart = new Date(Date.UTC(isoYear, 0, 1));
+  var week = Math.ceil((((tmp - yearStart) / 86400000) + 1) / 7);
+  // Monday of this week (from the original date)
+  var mon = new Date(d);
+  var wd = mon.getDay() || 7;
+  mon.setDate(mon.getDate() - (wd - 1));
+  var sun = new Date(mon);
+  sun.setDate(mon.getDate() + 6);
+  var fmtISO = function(x){
+    var m = String(x.getMonth()+1).padStart(2,'0');
+    var dd = String(x.getDate()).padStart(2,'0');
+    return x.getFullYear()+'-'+m+'-'+dd;
+  };
+  return { year: isoYear, week: week, monday: fmtISO(mon), sunday: fmtISO(sun) };
+}
+function weekKey(iso){
+  if (!iso) return NO_WEEK_KEY;
+  var p = isoWeekParts(iso);
+  if (!p) return NO_WEEK_KEY;
+  return p.year + '-W' + String(p.week).padStart(2,'0');
+}
+function weekLabel(key){
+  if (key === NO_WEEK_KEY) return 'No input date';
+  // Reconstruct label from any member; easier to store range at build time,
+  // but we can parse the key and derive Monday/Sunday.
+  var m = /^(\d{4})-W(\d{2})$/.exec(key);
+  if (!m) return key;
+  var year = parseInt(m[1],10), wk = parseInt(m[2],10);
+  // Monday of ISO week: Jan 4th is always in week 1.
+  var jan4 = new Date(Date.UTC(year,0,4));
+  var day = jan4.getUTCDay() || 7;
+  var week1Mon = new Date(jan4);
+  week1Mon.setUTCDate(jan4.getUTCDate() - (day - 1));
+  var mon = new Date(week1Mon);
+  mon.setUTCDate(week1Mon.getUTCDate() + (wk - 1) * 7);
+  var sun = new Date(mon);
+  sun.setUTCDate(mon.getUTCDate() + 6);
+  var fmt = function(x){
+    return x.toLocaleDateString('en-GB', { day:'numeric', month:'short', timeZone:'UTC' });
+  };
+  return 'W' + wk + ' · ' + fmt(mon) + ' – ' + fmt(sun) + ' ' + year;
+}
+// Distinct week groups present in a list, newest-first.
+function weekGroups(list){
+  var map = {};
+  (list || []).forEach(function(s){
+    var k = weekKey(s.input_date);
+    if (!map[k]) map[k] = { key:k, count:0 };
+    map[k].count++;
+  });
+  return Object.keys(map).sort(function(a,b){
+    if (a === NO_WEEK_KEY) return 1;
+    if (b === NO_WEEK_KEY) return -1;
+    return b.localeCompare(a);
+  }).map(function(k){ var g = map[k]; g.label = weekLabel(k); return g; });
+}
+// A week selection is an array of week keys; empty/["__all__"] means all.
+function weekSelectionMatches(sel, s){
+  if (!sel || !sel.length || sel.indexOf('__all__') !== -1) return true;
+  return sel.indexOf(weekKey(s.input_date)) !== -1;
+}
+// Build a checkbox list for multi-week selection.
+function weekMultiSelectHtml(list, selected, namePrefix){
+  var groups = weekGroups(list);
+  if (!groups.length) return '<div class="weekfilter__empty">No weeks to filter.</div>';
+  var sel = selected || [];
+  var allActive = !sel.length || sel.indexOf('__all__') !== -1;
+  var items = groups.map(function(g){
+    var on = !allActive && sel.indexOf(g.key) !== -1;
+    return '<label class="weekfilter__chip'+(on?' is-on':'')+'">'
+      + '<input type="checkbox" class="'+namePrefix+'WeekChk" value="'+esc(g.key)+'"'+(on?' checked':'')+'>'
+      + '<span>'+esc(g.label)+' ('+g.count+')</span>'
+    + '</label>';
+  }).join('');
+  return '<div class="weekfilter">'
+    + '<div class="weekfilter__head">'
+      + '<button type="button" class="weekfilter__act" data-week-all="'+namePrefix+'">All weeks</button>'
+      + '<button type="button" class="weekfilter__act" data-week-none="'+namePrefix+'">Clear</button>'
+    + '</div>'
+    + '<div class="weekfilter__chips">'+items+'</div>'
+  + '</div>';
 }
 
 /* Region display order for grouping: Philippines, Malaysia, Singapore,
@@ -1871,7 +1970,7 @@ function currentExportScope(){
 function exportJson(listArg, labelArg){
   var scope = currentExportScope();
   var list = listArg || (scope === 'filtered' ? filteredSlides() : slides);
-  if (!listArg) list = slidesByPublishDate(list, state.exportDateFilter);
+  if (!listArg) list = slidesByInputDate(list, state.exportDateFilter);
   if (!list.length){ setStatus('Nothing to export — the current selection has no slides.', false); return; }
   var stamp = new Date().toISOString().slice(0,10);
   var payload = {
@@ -1895,7 +1994,7 @@ function exportJson(listArg, labelArg){
 function exportEmailHtml(listArg, labelArg){
   var scope = currentExportScope();
   var list = listArg || (scope === 'filtered' ? filteredSlides() : slides);
-  if (!listArg) list = slidesByPublishDate(list, state.exportDateFilter);
+  if (!listArg) list = slidesByInputDate(list, state.exportDateFilter);
   if (!list.length){ setStatus('Nothing to export — the current selection has no slides.', false); return; }
 
   var baseUrl = state.emailBaseUrl || '';
@@ -1951,7 +2050,7 @@ function buildPrintDoc(list, titleLabel){
 function exportPdf(listArg, labelArg){
   var scope = currentExportScope();
   var list = listArg || (scope === 'filtered' ? filteredSlides() : slides);
-  if (!listArg) list = slidesByPublishDate(list, state.exportDateFilter);
+  if (!listArg) list = slidesByInputDate(list, state.exportDateFilter);
   if (!list.length){ setStatus('Nothing to export — the current selection has no slides.', false); return; }
 
   // Preferred path: build a real vector PDF with genuine, clickable link
@@ -2981,7 +3080,7 @@ async function generateExecEmail(){
   var scope = currentExecScope();
   var list = scope === 'all' ? slides : filteredSlides();
   // Narrow to a single publish date when one is chosen in the dropdown.
-  list = slidesByPublishDate(list, state.emailDateFilter);
+  list = slidesByInputDate(list, state.emailDateFilter);
   if (!list.length){
     setStatus('Nothing to include — no slides in the selected scope and publish date.', false);
     return;
@@ -3252,7 +3351,12 @@ function renderAddPane(wrap){
         var k = s.input_date ? s.input_date : NO_INPUT_DATE_KEY; return k === entryFilter; })){
     entryFilter = state.entryDateFilter = '__all__';
   }
-  var visibleSlides = slidesByInputDate(slides, entryFilter);
+  // Prune any selected weeks that no longer exist.
+  var entryWeekKeys = weekGroups(slides).map(function(g){ return g.key; });
+  state.entryWeekFilter = (state.entryWeekFilter || []).filter(function(k){ return entryWeekKeys.indexOf(k) !== -1; });
+  var visibleSlides = slidesByInputDate(slides, entryFilter).filter(function(s){
+    return weekSelectionMatches(state.entryWeekFilter, s);
+  });
 
   function entryRowHtml(s){
     return '<tr>'
@@ -3354,6 +3458,10 @@ function renderAddPane(wrap){
             + '<label class="datefilterbar__label" for="entryDateFilter">Filter by input date</label>'
             + '<select id="entryDateFilter" class="datefilterbar__select">'+inputDateOptionsHtml(slides, entryFilter)+'</select>'
             + '<span class="datefilterbar__count">Showing '+visibleSlides.length+' of '+slides.length+'</span>'
+          + '</div>'
+          + '<div class="weekfilterwrap">'
+            + '<div class="weekfilterwrap__label">Filter by week'+((state.entryWeekFilter&&state.entryWeekFilter.length)?' — '+state.entryWeekFilter.length+' selected':'')+'</div>'
+            + weekMultiSelectHtml(slides, state.entryWeekFilter, 'entry')
           + '</div>'
           + '<div class="archivebar">'
             + '<label class="archivebar__all"><input type="checkbox" id="archiveSelectAll"> Select all'+(entryFilter!=='__all__'?' shown':'')+'</label>'
@@ -3596,6 +3704,28 @@ function wireAddPane(wrap){
       renderAddPane(wrap); // re-render the list (and reset the tick selection)
     });
   }
+
+  // --- week multi-select (existing entries) ---
+  wrap.querySelectorAll('.entryWeekChk').forEach(function(chk){
+    chk.addEventListener('change', function(){
+      var cur = new Set(state.entryWeekFilter || []);
+      if (chk.checked) cur.add(chk.value); else cur.delete(chk.value);
+      state.entryWeekFilter = Array.prototype.slice.call(cur);
+      renderAddPane(wrap);
+    });
+  });
+  var entryWeekAll = wrap.querySelector('[data-week-all="entry"]');
+  if (entryWeekAll) entryWeekAll.addEventListener('click', function(){
+    state.entryWeekFilter = [];
+    renderAddPane(wrap);
+  });
+  var entryWeekNone = wrap.querySelector('[data-week-none="entry"]');
+  if (entryWeekNone) entryWeekNone.addEventListener('click', function(){
+    // "Clear" = show nothing until a week is picked; use a sentinel empty-match.
+    // Simpler UX: clearing selects no weeks -> treat as all. So Clear resets to all.
+    state.entryWeekFilter = [];
+    renderAddPane(wrap);
+  });
 
   // --- archive selection ---
   var checks = wrap.querySelectorAll('.archiveCheck');
@@ -4080,8 +4210,12 @@ function renderArchivePane(wrap){
   if (periodFilter !== '__all__' && !periodGroups.some(function(g){ return g.key === periodFilter; })){
     periodFilter = state.archivePeriodFilter = '__all__';
   }
+  // Prune selected weeks that no longer exist among archived entries.
+  var archiveWeekKeys = weekGroups(allArchivedSlides).map(function(g){ return g.key; });
+  state.archiveWeekFilter = (state.archiveWeekFilter || []).filter(function(k){ return archiveWeekKeys.indexOf(k) !== -1; });
   function matchesPeriod(s){
-    return periodFilter === '__all__' || periodKey(s.input_date, gran) === periodFilter;
+    var okPeriod = (periodFilter === '__all__' || periodKey(s.input_date, gran) === periodFilter);
+    return okPeriod && weekSelectionMatches(state.archiveWeekFilter, s);
   }
   var totalMatch = allArchivedSlides.filter(matchesPeriod).length;
 
@@ -4147,6 +4281,10 @@ function renderArchivePane(wrap){
         + '<select id="archivePeriod" class="datefilterbar__select">'+periodOpts.join('')+'</select>'
         + '<span class="datefilterbar__count">Showing '+totalMatch+' of '+allArchivedSlides.length+'</span>'
       + '</div>'
+      + '<div class="weekfilterwrap">'
+        + '<div class="weekfilterwrap__label">Filter by week'+((state.archiveWeekFilter&&state.archiveWeekFilter.length)?' — '+state.archiveWeekFilter.length+' selected':'')+'</div>'
+        + weekMultiSelectHtml(allArchivedSlides, state.archiveWeekFilter, 'archive')
+      + '</div>'
       + '<div class="archivenote">Archives live in this browser only — not an off-device backup. Your permanent record is the exported PDF (and JSON, for re-import).</div>'
     + '</div>'
     + (batchHtml || '<div class="panel"><div class="detailblock__empty">No archived entries in this period.</div></div>');
@@ -4160,6 +4298,24 @@ function renderArchivePane(wrap){
   var periodSel = wrap.querySelector('#archivePeriod');
   if (periodSel) periodSel.addEventListener('change', function(){
     state.archivePeriodFilter = periodSel.value || '__all__';
+    renderArchivePane(wrap);
+  });
+  wrap.querySelectorAll('.archiveWeekChk').forEach(function(chk){
+    chk.addEventListener('change', function(){
+      var cur = new Set(state.archiveWeekFilter || []);
+      if (chk.checked) cur.add(chk.value); else cur.delete(chk.value);
+      state.archiveWeekFilter = Array.prototype.slice.call(cur);
+      renderArchivePane(wrap);
+    });
+  });
+  var archWeekAll = wrap.querySelector('[data-week-all="archive"]');
+  if (archWeekAll) archWeekAll.addEventListener('click', function(){
+    state.archiveWeekFilter = [];
+    renderArchivePane(wrap);
+  });
+  var archWeekNone = wrap.querySelector('[data-week-none="archive"]');
+  if (archWeekNone) archWeekNone.addEventListener('click', function(){
+    state.archiveWeekFilter = [];
     renderArchivePane(wrap);
   });
 
@@ -4253,7 +4409,7 @@ function renderExportPane(wrap){
         + '<label><input type="radio" name="exportScope" value="all"> All slides ('+slides.length+')</label>'
       + '</div>'
       + '<div class="datefilterbar">'
-        + '<label class="datefilterbar__label" for="exportDateFilter">Publish date to include</label>'
+        + '<label class="datefilterbar__label" for="exportDateFilter">Input date to include</label>'
         + '<select id="exportDateFilter" class="datefilterbar__select"></select>'
         + '<span class="datefilterbar__count" id="exportDateCount"></span>'
       + '</div>'
@@ -4314,11 +4470,11 @@ function renderExportPane(wrap){
   function refreshExportDates(){
     var list = exportScopeList();
     if (state.exportDateFilter !== '__all__' && !list.some(function(s){
-          var k = s.date ? s.date : NO_DATE_KEY; return k === state.exportDateFilter; })){
+          var k = s.input_date ? s.input_date : NO_INPUT_DATE_KEY; return k === state.exportDateFilter; })){
       state.exportDateFilter = '__all__';
     }
-    expDateSel.innerHTML = publishDateOptionsHtml(list, state.exportDateFilter);
-    var n = slidesByPublishDate(list, state.exportDateFilter).length;
+    expDateSel.innerHTML = inputDateOptionsHtml(list, state.exportDateFilter);
+    var n = slidesByInputDate(list, state.exportDateFilter).length;
     if (expDateCount) expDateCount.textContent = n + ' update' + (n === 1 ? '' : 's') + ' will be exported';
   }
   refreshExportDates();
@@ -4421,7 +4577,7 @@ function renderEmailPane(wrap){
         + '<label><input type="radio" name="execScope" value="all"> All slides ('+slides.length+')</label>'
       + '</div>'
       + '<div class="datefilterbar">'
-        + '<label class="datefilterbar__label" for="emailDateFilter">Publish date to include</label>'
+        + '<label class="datefilterbar__label" for="emailDateFilter">Input date to include</label>'
         + '<select id="emailDateFilter" class="datefilterbar__select"></select>'
         + '<span class="datefilterbar__count" id="emailDateCount"></span>'
       + '</div>'
@@ -4443,11 +4599,11 @@ function renderEmailPane(wrap){
     var list = scopeList();
     // Drop a stale date selection that isn't in the current scope.
     if (state.emailDateFilter !== '__all__' && !list.some(function(s){
-          var k = s.date ? s.date : NO_DATE_KEY; return k === state.emailDateFilter; })){
+          var k = s.input_date ? s.input_date : NO_INPUT_DATE_KEY; return k === state.emailDateFilter; })){
       state.emailDateFilter = '__all__';
     }
-    dateSel.innerHTML = publishDateOptionsHtml(list, state.emailDateFilter);
-    var n = slidesByPublishDate(list, state.emailDateFilter).length;
+    dateSel.innerHTML = inputDateOptionsHtml(list, state.emailDateFilter);
+    var n = slidesByInputDate(list, state.emailDateFilter).length;
     if (dateCount) dateCount.textContent = n + ' update' + (n === 1 ? '' : 's') + ' will be included';
   }
   refreshEmailDates();
