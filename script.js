@@ -3715,7 +3715,7 @@ function wireAddPane(wrap){
       if (!chk) return;
       var cur = new Set(state.entryWeekFilter || []);
       if (chk.checked) cur.add(chk.value); else cur.delete(chk.value);
-      state.entryWeekFilter = Array.prototype.slice.call(cur);
+      state.entryWeekFilter = Array.from(cur);
       renderAddPane(wrap);
     });
     wrap.addEventListener('click', function(e){
@@ -4306,7 +4306,7 @@ function renderArchivePane(wrap){
       if (!chk) return;
       var cur = new Set(state.archiveWeekFilter || []);
       if (chk.checked) cur.add(chk.value); else cur.delete(chk.value);
-      state.archiveWeekFilter = Array.prototype.slice.call(cur);
+      state.archiveWeekFilter = Array.from(cur);
       renderArchivePane(wrap);
     });
     wrap.addEventListener('click', function(e){
