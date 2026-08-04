@@ -489,9 +489,11 @@ var state = {
   digestHtml: null,           // last generated regional digest HTML
   selectedForDelete: new Set(),  // slide ids ticked in the Manage/Delete pane
   editDraft: null,            // in-progress add/edit entry (null until the Add pane builds one)
-  entryDateFilter: '__all__', // Existing-entries list: publish-date filter (for choosing what to archive)
+  entryDateFilter: '__all__', // Existing-entries list: input-date filter (for choosing what to archive)
   emailDateFilter: '__all__', // Generate email: which publish date to include ('__all__' = every date)
   exportDateFilter: '__all__', // Export slides: which publish date to include ('__all__' = every date)
+  archiveGranularity: 'month', // Archive filter granularity: 'month' | 'quarter' | 'year'
+  archivePeriodFilter: '__all__', // Archive: which period to show ('__all__' = every period)
   present: { list: [], index: 0, dateFilter: '__all__' }  // presentation session: ordered slides + cursor + publish-date filter
 };
 
@@ -536,6 +538,87 @@ function slidesByPublishDate(list, key){
     return k === key;
   });
   return out;
+}
+
+/* ---- Input-date grouping (parallels the publish-date helpers above) ----
+   The "input date" is the date an entry was logged (s.input_date). It drives
+   the Existing-entries grouping/filter, and the Present date filter. */
+var NO_INPUT_DATE_KEY = '__noinput__';
+function inputDateGroups(list){
+  var map = {};
+  (list || []).forEach(function(s){
+    var k = s && s.input_date ? s.input_date : NO_INPUT_DATE_KEY;
+    if (!map[k]) map[k] = { key: k, count: 0 };
+    map[k].count++;
+  });
+  return Object.keys(map).sort(function(a, b){
+    if (a === NO_INPUT_DATE_KEY) return 1;
+    if (b === NO_INPUT_DATE_KEY) return -1;
+    return b.localeCompare(a);           // newest input date first
+  }).map(function(k){
+    var g = map[k];
+    g.label = (k === NO_INPUT_DATE_KEY) ? 'No input date' : fmtDate(k);
+    return g;
+  });
+}
+function inputDateOptionsHtml(list, selected){
+  var groups = inputDateGroups(list);
+  var opts = ['<option value="__all__"'+(selected==='__all__'||!selected?' selected':'')+'>All input dates ('+(list?list.length:0)+')</option>'];
+  groups.forEach(function(g){
+    opts.push('<option value="'+esc(g.key)+'"'+(selected===g.key?' selected':'')+'>'+esc(g.label)+' ('+g.count+')</option>');
+  });
+  return opts.join('');
+}
+function slidesByInputDate(list, key){
+  if (!key || key === '__all__') return list.slice();
+  return list.filter(function(s){
+    var k = (s && s.input_date) ? s.input_date : NO_INPUT_DATE_KEY;
+    return k === key;
+  });
+}
+
+/* Region display order for grouping: Philippines, Malaysia, Singapore,
+   Thailand, Vietnam (PH-MY-SG-TH-VN), then anything else, alphabetically. */
+var REGION_GROUP_ORDER = ['Philippines', 'Malaysia', 'Singapore', 'Thailand', 'Vietnam'];
+function regionGroupRank(r){
+  var i = REGION_GROUP_ORDER.indexOf(r);
+  return i === -1 ? REGION_GROUP_ORDER.length : i;
+}
+
+/* ---- Period bucketing (month / quarter / year) for the Archive filter.
+   Buckets an entry by its input date at the chosen granularity. */
+var NO_PERIOD_KEY = '__noperiod__';
+function periodKey(inputDate, gran){
+  if (!inputDate) return NO_PERIOD_KEY;
+  var y = inputDate.slice(0,4);
+  var mo = parseInt(inputDate.slice(5,7), 10);
+  if (isNaN(mo)) return NO_PERIOD_KEY;
+  if (gran === 'year') return y;
+  if (gran === 'quarter') return y + '-Q' + (Math.floor((mo-1)/3) + 1);
+  return inputDate.slice(0,7); // month: YYYY-MM
+}
+function periodLabel(key, gran){
+  if (key === NO_PERIOD_KEY) return 'No input date';
+  if (gran === 'year') return key;
+  if (gran === 'quarter') return key.replace('-Q', ' Q');
+  // month YYYY-MM
+  var d = new Date(key + '-01T00:00:00');
+  if (isNaN(d.getTime())) return key;
+  return d.toLocaleDateString('en-GB', { month:'short', year:'numeric' });
+}
+// Distinct period options present across an entry list, newest-first.
+function archivePeriodGroups(list, gran){
+  var map = {};
+  (list || []).forEach(function(s){
+    var k = periodKey(s.input_date, gran);
+    if (!map[k]) map[k] = { key:k, count:0 };
+    map[k].count++;
+  });
+  return Object.keys(map).sort(function(a,b){
+    if (a === NO_PERIOD_KEY) return 1;
+    if (b === NO_PERIOD_KEY) return -1;
+    return b.localeCompare(a);
+  }).map(function(k){ var g = map[k]; g.label = periodLabel(k, gran); return g; });
 }
 
 var BROWSE_VIEWS = { browse: true };
@@ -659,6 +742,13 @@ function deleteBatch(batchId){
 function renameBatch(batchId, label){
   var batch = archives.find(function(b){ return b.id === batchId; });
   if (batch){ batch.label = label.trim() || batch.label; saveArchives(); }
+}
+
+function todayIso(){
+  var d = new Date();
+  var m = String(d.getMonth()+1).padStart(2,'0');
+  var day = String(d.getDate()).padStart(2,'0');
+  return d.getFullYear()+'-'+m+'-'+day;
 }
 
 function fmtDate(iso){
@@ -2941,6 +3031,7 @@ function blankDraft(){
     platform: ALLOWED_PLATFORMS[0] || 'Others',
     region: ALLOWED_REGIONS[0] || '',
     regions: (ALLOWED_REGIONS[0] ? [ALLOWED_REGIONS[0]] : []), // multi-select set (new entries)
+    input_date: todayIso(),
     date: '',
     date_range: '',
     title: '',
@@ -3006,6 +3097,7 @@ function draftFromSlide(s){
     platform: s.platform,
     region: _regs[0] || '',
     regions: _regs.slice(),                 // full multi-region set, editable as-is
+    input_date: s.input_date || '',
     date: s.date || '',
     date_range: s.date_range || '',
     title: s.title || '',
@@ -3150,25 +3242,25 @@ function renderAddPane(wrap){
     ? d.body.map(detailBlockHtml).join('')
     : '<div class="detailblock__empty" style="padding:14px;text-align:center;">No details yet — add a text block or image below. You can paste tables directly into a text block.</div>';
 
-  // Existing entries list (edit/delete + select-to-archive). The publish-date
+  // Existing entries list (edit/delete + select-to-archive). The input-date
   // filter narrows which entries show, so you can archive one date's batch
-  // without hunting through the whole table.
+  // without hunting through the whole table. Rows are grouped by input date,
+  // then by region in the order PH-MY-SG-TH-VN.
   var entryFilter = state.entryDateFilter || '__all__';
   // If the chosen date no longer exists (e.g. after archiving it), fall back.
   if (entryFilter !== '__all__' && !slides.some(function(s){
-        var k = s.date ? s.date : NO_DATE_KEY; return k === entryFilter; })){
+        var k = s.input_date ? s.input_date : NO_INPUT_DATE_KEY; return k === entryFilter; })){
     entryFilter = state.entryDateFilter = '__all__';
   }
-  var visibleSlides = slidesByPublishDate(slides, entryFilter);
-  var listRows = visibleSlides.slice().sort(function(a,b){
-    return (b.date||'').localeCompare(a.date||'') || (a.title||'').localeCompare(b.title||'');
-  }).map(function(s){
+  var visibleSlides = slidesByInputDate(slides, entryFilter);
+
+  function entryRowHtml(s){
     return '<tr>'
       + '<td class="entrytable__check"><input type="checkbox" class="archiveCheck" data-id="'+esc(s.id)+'" aria-label="Select for archive"></td>'
       + '<td class="entrytable__title">'+esc(s.title)+'</td>'
       + '<td>'+esc(s.platform)+'</td>'
       + '<td>'+esc(entryRegions(s).join(', '))+'</td>'
-      + '<td>'+esc(s.date ? fmtDate(s.date) : (s.date_range||'—'))+'</td>'
+      + '<td>'+esc(s.input_date ? fmtDate(s.input_date) : '—')+'</td>'
       + '<td>'+esc(s.createdBy || '—')+'</td>'
       + '<td style="white-space:nowrap;">'+esc(fmtStamp(s.createdAt))+'</td>'
       + '<td style="white-space:nowrap;">'
@@ -3176,6 +3268,44 @@ function renderAddPane(wrap){
         + '<button type="button" class="entrytable__act entrytable__act--del" data-del="'+esc(s.id)+'">Delete</button>'
       + '</td>'
     + '</tr>';
+  }
+
+  // Build grouped rows: first by input date (newest first), then by region
+  // (PH-MY-SG-TH-VN). An entry covering several regions appears once, filed
+  // under its first region in that order.
+  var COLSPAN = 8;
+  function primaryRegionForGroup(s){
+    var regs = entryRegions(s);
+    if (!regs.length) return '';
+    return regs.slice().sort(function(a,b){ return regionGroupRank(a) - regionGroupRank(b); })[0];
+  }
+  var idGroups = inputDateGroups(visibleSlides); // ordered newest-first, incl. no-input bucket
+  var listRows = idGroups.map(function(g){
+    var inGroup = visibleSlides.filter(function(s){
+      var k = s.input_date ? s.input_date : NO_INPUT_DATE_KEY; return k === g.key;
+    });
+    // partition by region order
+    var byRegion = {};
+    inGroup.forEach(function(s){
+      var pr = primaryRegionForGroup(s) || '__none__';
+      (byRegion[pr] = byRegion[pr] || []).push(s);
+    });
+    var regionKeys = Object.keys(byRegion).sort(function(a,b){
+      var ra = a==='__none__' ? 999 : regionGroupRank(a);
+      var rb = b==='__none__' ? 999 : regionGroupRank(b);
+      return ra - rb || a.localeCompare(b);
+    });
+    var dateHeader = '<tr class="entrytable__grouphead entrytable__grouphead--date">'
+      + '<td colspan="'+COLSPAN+'">'+esc(g.label)+' &middot; '+inGroup.length+' entr'+(inGroup.length===1?'y':'ies')+'</td></tr>';
+    var body = regionKeys.map(function(rk){
+      var label = rk==='__none__' ? 'No region' : rk;
+      var rows = byRegion[rk].slice().sort(function(a,b){
+        return (a.platform||'').localeCompare(b.platform||'') || (a.title||'').localeCompare(b.title||'');
+      }).map(entryRowHtml).join('');
+      return '<tr class="entrytable__grouphead entrytable__grouphead--region">'
+        + '<td colspan="'+COLSPAN+'">'+esc(label)+'</td></tr>' + rows;
+    }).join('');
+    return dateHeader + body;
   }).join('');
 
   wrap.innerHTML =
@@ -3184,6 +3314,7 @@ function renderAddPane(wrap){
       + '<p class="panel__hint">Fill in the update below. A single entry can cover <strong>several regions</strong> — tick each one under Region(s), and give each region its own link. <strong>Details</strong> is a rich-text editor — type freely, then select text and use the toolbar for <strong>bold</strong>, italic, headers, bullet lists, font size, colour and links. You can also <strong>paste a table</strong> straight into a text block and it will fit the width automatically. Add image blocks for pictures (up to 2). Everything flows into the browse views, presentation, email summary and PDF export.</p>'
 
       + '<div class="formgrid">'
+        + '<div class="formfield"><label>Input date</label><input type="date" id="fInputDate" value="'+esc(d.input_date||'')+'"><span class="formfield__hint">The date this update was logged. Drives grouping, filtering and the presentation.</span></div>'
         + '<div class="formfield"><label>Platform</label><select id="fPlatform">'+optionsHtml(ALLOWED_PLATFORMS, d.platform)+'</select></div>'
         + regionFieldHtml(d, editing)
         + '<div class="formfield"><label>Publish date</label><input type="date" id="fDate" value="'+esc(d.date)+'"><span class="formfield__hint">Drives sorting, filtering and the presentation grouping.</span></div>'
@@ -3217,11 +3348,11 @@ function renderAddPane(wrap){
 
     + '<div class="panel">'
       + '<div class="panel__head"><h2 class="panel__title">Existing entries ('+slides.length+')</h2></div>'
-      + '<p class="panel__hint">Edit or remove any entry. Filter by <strong>publish date</strong> to isolate one batch, then tick entries and use <strong>Archive selected</strong> to set them aside — archived entries leave the browse, presentation and email/PDF views but can be restored anytime from the Archive tab. Saved to this browser.</p>'
+      + '<p class="panel__hint">Edit or remove any entry. Entries are grouped by <strong>input date</strong>, then by region (PH-MY-SG-TH-VN). Filter by <strong>input date</strong> to isolate one batch, then tick entries and use <strong>Archive selected</strong> to set them aside — archived entries leave the browse, presentation and email/PDF views but can be restored anytime from the Archive tab. Saved to this browser.</p>'
       + (slides.length
         ? '<div class="datefilterbar">'
-            + '<label class="datefilterbar__label" for="entryDateFilter">Filter by publish date</label>'
-            + '<select id="entryDateFilter" class="datefilterbar__select">'+publishDateOptionsHtml(slides, entryFilter)+'</select>'
+            + '<label class="datefilterbar__label" for="entryDateFilter">Filter by input date</label>'
+            + '<select id="entryDateFilter" class="datefilterbar__select">'+inputDateOptionsHtml(slides, entryFilter)+'</select>'
             + '<span class="datefilterbar__count">Showing '+visibleSlides.length+' of '+slides.length+'</span>'
           + '</div>'
           + '<div class="archivebar">'
@@ -3231,8 +3362,8 @@ function renderAddPane(wrap){
             + '<button type="button" class="btn" id="archiveSelectedBtn" disabled>Archive selected</button>'
           + '</div>'
           + (listRows
-            ? '<table class="entrytable"><thead><tr><th class="entrytable__check"></th><th>Title</th><th>Platform</th><th>Region</th><th>Publish date</th><th>Added by</th><th>Timestamp</th><th></th></tr></thead><tbody>'+listRows+'</tbody></table>'
-            : '<div class="detailblock__empty">No entries with this publish date.</div>')
+            ? '<table class="entrytable"><thead><tr><th class="entrytable__check"></th><th>Title</th><th>Platform</th><th>Region</th><th>Input date</th><th>Added by</th><th>Timestamp</th><th></th></tr></thead><tbody>'+listRows+'</tbody></table>'
+            : '<div class="detailblock__empty">No entries with this input date.</div>')
         : '<div class="detailblock__empty">No entries yet.</div>')
     + '</div>';
 
@@ -3245,6 +3376,7 @@ function syncDraftFromForm(){
   var d = state.editDraft; if (!d) return;
   var g = function(id){ var el = document.getElementById(id); return el ? el.value : ''; };
   d.platform = g('fPlatform') || d.platform;
+  d.input_date = g('fInputDate');
   d.date = g('fDate');
   d.date_range = g('fRange');
   d.title = g('fTitle');
@@ -3599,6 +3731,7 @@ function saveEntry(wrap){
     links: links,
     region: regions[0],
     link: links[regions[0]] || '',
+    input_date: d.input_date || '',
     date: d.date || '',
     date_range: d.date_range.trim(),
     title: d.title.trim(),
@@ -3654,14 +3787,12 @@ function saveEntry(wrap){
 // "Undated" bucket — means the dropdown always accounts for every slide,
 // instead of silently dropping undated ones once a specific date is chosen.
 function presentDateKey(s){
-  if (s.date) return 'd:' + s.date;
-  if (s.date_range) return 'r:' + s.date_range;
+  if (s.input_date) return 'i:' + s.input_date;
   return '__undated__';
 }
 function presentDateLabel(s){
-  if (s.date) return fmtDate(s.date);
-  if (s.date_range) return s.date_range;
-  return 'Undated';
+  if (s.input_date) return fmtDate(s.input_date);
+  return 'No input date';
 }
 
 function buildPresentOrder(){
@@ -3678,7 +3809,7 @@ function buildPresentOrder(){
     // grouped by their date_range (or "Undated") instead of scattering.
     var ka = presentDateKey(a), kb = presentDateKey(b);
     if (ka !== kb){
-      var da = a.date || '', db = b.date || '';
+      var da = a.input_date || '', db = b.input_date || '';
       if (!da && !db) return presentDateLabel(a).localeCompare(presentDateLabel(b));
       if (!da) return 1;
       if (!db) return -1;
@@ -3703,7 +3834,7 @@ function populatePresentDates(){
   var groups = {}; // key -> { label, sortDate, count }
   all.forEach(function(s){
     var key = presentDateKey(s);
-    if (!groups[key]) groups[key] = { label: presentDateLabel(s), sortDate: s.date || '', count: 0 };
+    if (!groups[key]) groups[key] = { label: presentDateLabel(s), sortDate: s.input_date || '', count: 0 };
     groups[key].count++;
   });
   var keys = Object.keys(groups).sort(function(ka, kb){
@@ -3777,7 +3908,7 @@ function renderPresent(){
   // breadcrumb: date › region(s) › platform
   var pRegs = entryRegions(s);
   crumbs.innerHTML =
-    '<span class="present__crumb present__crumb--date">'+esc(s.date ? fmtDate(s.date) : (s.date_range || 'Undated'))+'</span>'
+    '<span class="present__crumb present__crumb--date">'+esc(s.input_date ? fmtDate(s.input_date) : 'No input date')+'</span>'
     + '<span class="present__crumbsep">&rsaquo;</span>'
     + '<span class="present__crumb">'+esc(pRegs.join(', '))+'</span>'
     + '<span class="present__crumbsep">&rsaquo;</span>'
@@ -3802,7 +3933,7 @@ function renderPresent(){
       + '<div class="present__eyebrow">'
         + '<span class="present__tag present__tag--platform">'+esc(s.platform)+'</span>'
         + pRegs.map(function(r){ return '<span class="present__tag">'+esc(r)+'</span>'; }).join('')
-        + (s.date ? '<span class="present__tag">'+esc(fmtDate(s.date))+'</span>' : (s.date_range ? '<span class="present__tag">'+esc(s.date_range)+'</span>' : ''))
+        + (s.input_date ? '<span class="present__tag">'+esc(fmtDate(s.input_date))+'</span>' : '')
       + '</div>'
       + '<h1 class="present__title">'+esc(s.title)+'</h1>'
       + presentLinkHtml
@@ -3939,16 +4070,36 @@ function renderArchivePane(wrap){
     return;
   }
 
-  var batchHtml = archives.map(function(b){
-    var rows = b.slides.slice().sort(function(a,c){
-      return (c.date||'').localeCompare(a.date||'') || (a.title||'').localeCompare(c.title||'');
+  // ---- Period filter (per month / quarter / year, by entry input date) ----
+  var gran = state.archiveGranularity || 'month';
+  var periodFilter = state.archivePeriodFilter || '__all__';
+  var allArchivedSlides = [];
+  archives.forEach(function(b){ (b.slides||[]).forEach(function(s){ allArchivedSlides.push(s); }); });
+  var periodGroups = archivePeriodGroups(allArchivedSlides, gran);
+  // If the chosen period no longer exists at this granularity, reset.
+  if (periodFilter !== '__all__' && !periodGroups.some(function(g){ return g.key === periodFilter; })){
+    periodFilter = state.archivePeriodFilter = '__all__';
+  }
+  function matchesPeriod(s){
+    return periodFilter === '__all__' || periodKey(s.input_date, gran) === periodFilter;
+  }
+  var totalMatch = allArchivedSlides.filter(matchesPeriod).length;
+
+  var visibleBatches = archives.filter(function(b){
+    return (b.slides||[]).some(matchesPeriod);
+  });
+
+  var batchHtml = visibleBatches.map(function(b){
+    var batchMatchSlides = b.slides.filter(matchesPeriod);
+    var rows = batchMatchSlides.slice().sort(function(a,c){
+      return (c.input_date||'').localeCompare(a.input_date||'') || (a.title||'').localeCompare(c.title||'');
     }).map(function(s){
       return '<tr>'
         + '<td class="entrytable__check"><input type="checkbox" class="restoreCheck" data-batch="'+esc(b.id)+'" data-id="'+esc(s.id)+'" aria-label="Select to restore"></td>'
         + '<td class="entrytable__title">'+esc(s.title)+'</td>'
         + '<td>'+esc(s.platform)+'</td>'
         + '<td>'+esc(entryRegions(s).join(', '))+'</td>'
-        + '<td>'+esc(s.date ? fmtDate(s.date) : (s.date_range||'—'))+'</td>'
+        + '<td>'+esc(s.input_date ? fmtDate(s.input_date) : '—')+'</td>'
       + '</tr>';
     }).join('');
 
@@ -3956,7 +4107,7 @@ function renderArchivePane(wrap){
       + '<div class="archivebatch__head">'
         + '<div>'
           + '<h2 class="panel__title archivebatch__label" data-batch="'+esc(b.id)+'">'+esc(b.label)+'</h2>'
-          + '<div class="archivebatch__meta">'+b.slides.length+' entr'+(b.slides.length===1?'y':'ies')+' · archived '+esc(fmtDate(new Date(b.archivedAt).toISOString().slice(0,10)))+'</div>'
+          + '<div class="archivebatch__meta">'+(periodFilter==='__all__' ? b.slides.length+' entr'+(b.slides.length===1?'y':'ies') : batchMatchSlides.length+' of '+b.slides.length+' entr'+(b.slides.length===1?'y':'ies')+' shown')+' · archived '+esc(fmtDate(new Date(b.archivedAt).toISOString().slice(0,10)))+'</div>'
         + '</div>'
         + '<div class="archivebatch__actions">'
           + '<button type="button" class="btn btn--ghost btnsm" data-arch-rename="'+esc(b.id)+'">Rename</button>'
@@ -3971,17 +4122,46 @@ function renderArchivePane(wrap){
         + '<button type="button" class="btn btnsm" data-arch-restore="'+esc(b.id)+'" disabled>Restore selected</button>'
         + '<button type="button" class="btn btn--ghost btnsm" data-arch-restoreall="'+esc(b.id)+'">Restore all</button>'
       + '</div>'
-      + '<table class="entrytable"><thead><tr><th class="entrytable__check"></th><th>Title</th><th>Platform</th><th>Region</th><th>Publish date</th></tr></thead><tbody>'+rows+'</tbody></table>'
+      + '<table class="entrytable"><thead><tr><th class="entrytable__check"></th><th>Title</th><th>Platform</th><th>Region</th><th>Input date</th></tr></thead><tbody>'+rows+'</tbody></table>'
     + '</div>';
   }).join('');
+
+  var granLabel = { month:'Month', quarter:'Quarter', year:'Year' };
+  var periodOpts = ['<option value="__all__"'+(periodFilter==='__all__'?' selected':'')+'>All '+granLabel[gran].toLowerCase()+'s ('+allArchivedSlides.length+')</option>'];
+  periodGroups.forEach(function(g){
+    periodOpts.push('<option value="'+esc(g.key)+'"'+(periodFilter===g.key?' selected':'')+'>'+esc(g.label)+' ('+g.count+')</option>');
+  });
 
   wrap.innerHTML =
     '<div class="panel">'
       + '<div class="panel__head"><h2 class="panel__title">Archive ('+archives.length+' batch'+(archives.length===1?'':'es')+')</h2></div>'
-      + '<p class="panel__hint">Archived batches. Restore entries back to the active set, or export a batch to PDF/JSON. Deleting a batch is permanent.</p>'
+      + '<p class="panel__hint">Archived batches. Restore entries back to the active set, or export a batch to PDF/JSON. Deleting a batch is permanent. Use the filter below to narrow archived entries by <strong>month</strong>, <strong>quarter</strong> or <strong>year</strong> (based on input date).</p>'
+      + '<div class="datefilterbar">'
+        + '<label class="datefilterbar__label" for="archiveGran">Group by</label>'
+        + '<select id="archiveGran" class="datefilterbar__select">'
+          + '<option value="month"'+(gran==='month'?' selected':'')+'>Month</option>'
+          + '<option value="quarter"'+(gran==='quarter'?' selected':'')+'>Quarter</option>'
+          + '<option value="year"'+(gran==='year'?' selected':'')+'>Year</option>'
+        + '</select>'
+        + '<label class="datefilterbar__label" for="archivePeriod">Filter by '+granLabel[gran].toLowerCase()+'</label>'
+        + '<select id="archivePeriod" class="datefilterbar__select">'+periodOpts.join('')+'</select>'
+        + '<span class="datefilterbar__count">Showing '+totalMatch+' of '+allArchivedSlides.length+'</span>'
+      + '</div>'
       + '<div class="archivenote">Archives live in this browser only — not an off-device backup. Your permanent record is the exported PDF (and JSON, for re-import).</div>'
     + '</div>'
-    + batchHtml;
+    + (batchHtml || '<div class="panel"><div class="detailblock__empty">No archived entries in this period.</div></div>');
+
+  var granSel = wrap.querySelector('#archiveGran');
+  if (granSel) granSel.addEventListener('change', function(){
+    state.archiveGranularity = granSel.value || 'month';
+    state.archivePeriodFilter = '__all__'; // reset period when granularity changes
+    renderArchivePane(wrap);
+  });
+  var periodSel = wrap.querySelector('#archivePeriod');
+  if (periodSel) periodSel.addEventListener('change', function(){
+    state.archivePeriodFilter = periodSel.value || '__all__';
+    renderArchivePane(wrap);
+  });
 
   wireArchivePane(wrap);
 }
