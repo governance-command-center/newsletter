@@ -1,135 +1,1633 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Platform Updates</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trackory</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css?v=2" />
 </head>
 <body>
 
-<div class="shell">
-
-  <!-- ===================== LEFT NAV ===================== -->
-  <aside class="sidebar" id="sidebar">
-    <div class="sidebar__brand">
-      <div class="sidebar__mark">PU</div>
-      <div class="sidebar__brandtext">
-        <span class="sidebar__eyebrow">Company Newsletter</span>
-        <span class="sidebar__name">Platform Updates</span>
+  <!-- ═══════════ LOGIN SCREEN ═══════════ -->
+  <div id="login-screen" class="screen">
+    <div class="login-wrap">
+      <div class="login-logo">
+        <span class="logo-mark">TR</span>
+        <div class="logo-text-wrap"><span class="logo-text">Trackory</span><span class="logo-tagline">Every Check Accounted For.</span></div>
+      </div>
+      <div class="login-card">
+        <h2>Sign in</h2>
+        <div class="field">
+          <label>Username</label>
+          <input type="text" id="login-username" placeholder="your-username" autocomplete="username" />
+        </div>
+        <div class="field">
+          <label>Password</label>
+          <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password" />
+        </div>
+        <div id="login-error" class="error-msg" style="display:none;"></div>
+        <button id="login-btn" class="btn-primary" onclick="handleLogin()">Sign in</button>
       </div>
     </div>
+  </div>
 
-    <nav class="nav" id="adminNav" aria-label="Admin">
-      <div class="nav__label">Manage</div>
-      <button type="button" class="nav__item" data-nav="add">
-        <span class="nav__ico" aria-hidden="true">&#10133;</span>
-        <span class="nav__text">Add entry</span>
-      </button>
-      <!-- Import slides temporarily hidden from the UI. To restore, uncomment this block.
-      <button type="button" class="nav__item" data-nav="import">
-        <span class="nav__ico" aria-hidden="true">&#128229;</span>
-        <span class="nav__text">Import slides</span>
-      </button>
-      -->
-      <button type="button" class="nav__item" data-nav="export">
-        <span class="nav__ico" aria-hidden="true">&#128228;</span>
-        <span class="nav__text">Export slides</span>
-      </button>
-      <button type="button" class="nav__item" data-nav="email">
-        <span class="nav__ico" aria-hidden="true">&#9993;&#65039;</span>
-        <span class="nav__text">Generate email</span>
-      </button>
-      <button type="button" class="nav__item" data-nav="archive">
-        <span class="nav__ico" aria-hidden="true">&#128230;</span>
-        <span class="nav__text">Archive</span>
-      </button>
-      <button type="button" class="nav__item" data-nav="members">
-        <span class="nav__ico" aria-hidden="true">&#128101;</span>
-        <span class="nav__text">Members</span>
-      </button>
-    </nav>
+  <!-- ═══════════ ADMIN SCREEN ═══════════ -->
+  <div id="admin-screen" class="screen app-layout" style="display:none;">
 
-    <nav class="nav" aria-label="Primary">
-      <div class="nav__label">Browse</div>
-      <button type="button" class="nav__item is-active" data-nav="browse">
-        <span class="nav__ico" aria-hidden="true">&#128218;</span>
-        <span class="nav__text">Browse updates</span>
-      </button>
-      <button type="button" class="nav__item" data-nav="present">
-        <span class="nav__ico" aria-hidden="true">&#127909;</span>
-        <span class="nav__text">Present</span>
-      </button>
-    </nav>
-
-    <div class="sidebar__foot">
-      The source deck is the fix point, not this page.
-    </div>
-  </aside>
-
-  <!-- ===================== MAIN COLUMN ===================== -->
-  <div class="content">
-    <header class="topbar">
-      <button type="button" class="topbar__menu" id="menuToggle" aria-label="Toggle navigation">&#9776;</button>
-      <div class="topbar__heading">
-        <h1 id="pageTitle">By Platform</h1>
-        <p class="topbar__sub" id="pageSub">Every update, grouped by marketplace.</p>
+    <!-- ── SIDEBAR ── -->
+    <aside class="sidebar" id="admin-sidebar">
+      <div class="sidebar-header">
+        <span class="logo-mark sm">TR</span>
+        <div class="sidebar-brand" id="sidebar-brand-text">
+          <div class="sidebar-title">Trackory</div>
+          <div class="sidebar-sub" id="admin-sidebar-sub">Admin Dashboard</div>
+        </div>
+        <button class="sidebar-toggle" id="sidebar-toggle-btn" onclick="toggleSidebar()" title="Collapse sidebar">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 12L6 8l4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
       </div>
-      <div class="search" id="searchWrap">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.5"/><line x1="11" y1="11" x2="15" y2="15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-        <input id="searchInput" type="text" placeholder="Search updates&#8230;" aria-label="Search updates">
+
+      <!-- Campaign Filter -->
+      <div class="sidebar-campaign-wrap" id="sidebar-campaign-wrap">
+        <div class="sidebar-section-label">Campaign</div>
+        <select id="admin-campaign-filter" onchange="renderAdminView()" class="sidebar-select">
+          <option value="">All campaigns</option>
+        </select>
       </div>
-    </header>
 
-    <!-- Filters (shown only on browse views) -->
-    <div class="filters" id="filterRail" aria-label="Filters"></div>
+      <!-- Nav Items -->
+      <nav class="sidebar-nav">
+        <button class="nav-item active" id="navbtn-dashboard" onclick="switchAdminTab('dashboard')" title="Dashboard">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><rect x="2" y="2" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.5"/><rect x="11" y="2" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.5"/><rect x="2" y="11" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.5"/><rect x="11" y="11" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.5"/></svg>
+          <span class="nav-label">Dashboard</span>
+        </button>
+        <button class="nav-item" id="navbtn-calendar" onclick="switchAdminTab('calendar')" title="Calendar">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><rect x="2" y="4" width="16" height="14" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M6 2v4M14 2v4M2 9h16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <span class="nav-label">Calendar</span>
+        </button>
+        <button class="nav-item" id="navbtn-reports" onclick="switchAdminTab('reports')" title="Reports">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><rect x="2" y="3" width="16" height="14" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M6 7h8M6 10h5M6 13h7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <span class="nav-label">Reports</span>
+        </button>
+        <button class="nav-item admin-only" id="navbtn-data" onclick="switchAdminTab('data')" title="Data">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><ellipse cx="10" cy="5" rx="7" ry="2.5" stroke="currentColor" stroke-width="1.5"/><path d="M3 5v5c0 1.38 3.13 2.5 7 2.5s7-1.12 7-2.5V5" stroke="currentColor" stroke-width="1.5"/><path d="M3 10v5c0 1.38 3.13 2.5 7 2.5s7-1.12 7-2.5v-5" stroke="currentColor" stroke-width="1.5"/></svg>
+          <span class="nav-label">Data</span>
+        </button>
+        <button class="nav-item admin-only" id="navbtn-members" onclick="switchAdminTab('members')" title="Members">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><circle cx="7" cy="6" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M2 17c0-3 2.5-5 5-5s5 2 5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="15" cy="7" r="2.3" stroke="currentColor" stroke-width="1.5"/><path d="M12.5 17c.2-2.4 1.8-4 3.7-4 2 0 3.6 1.5 3.8 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <span class="nav-label">Members</span>
+        </button>
 
-    <!-- Browse feed -->
-    <main id="app" class="app">
-      <div class="loading" id="loadingState">Loading updates&#8230;</div>
+        <div class="nav-divider"></div>
+
+        <button class="nav-item nav-item-amber" id="navbtn-broadcast" onclick="openBroadcastModal()" title="Broadcast">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><path d="M16 3L4 8v4l12 5V3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M4 10h-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <span class="nav-label">Broadcast</span>
+        </button>
+        <button class="nav-item" id="navbtn-messages" onclick="openBroadcastFeed()" title="Messages" style="position:relative;">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><path d="M16 3L4 8v4l12 5V3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M4 10h-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <span class="nav-label">Messages</span>
+          <span class="nav-badge" id="admin-broadcast-badge" style="display:none;"></span>
+        </button>
+        <button class="nav-item admin-only" id="navbtn-checklist" onclick="switchAdminTab('checklist')" title="Checklist Templates">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><path d="M4 5h12M4 9h8M4 13h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M15 12l2 2-3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span class="nav-label">Checklist</span>
+        </button>
+
+        <div class="nav-divider admin-only" id="nav-alerts-divider"></div>
+        <button class="nav-item nav-item-danger admin-only" id="navbtn-alerts" onclick="switchAdminTab('alerts')" title="Alerts" style="display:none;">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><path d="M10 2a6 6 0 016 6v3l1.5 2.5H2.5L4 11V8a6 6 0 016-6z" stroke="currentColor" stroke-width="1.5"/><path d="M8 16a2 2 0 004 0" stroke="currentColor" stroke-width="1.5"/></svg>
+          <span class="nav-label">Alerts</span>
+          <span class="nav-badge" id="nav-alert-badge" style="display:none;"></span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="sidebar-signout-row">
+          <button class="nav-item nav-item-signout" onclick="handleLogout()" title="Sign out">
+            <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><path d="M13 15l4-4-4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M17 11H7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M7 4H4a1 1 0 00-1 1v10a1 1 0 001 1h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            <span class="nav-label">Sign out</span>
+          </button>
+          <span class="sidebar-username" id="admin-sidebar-username">Admin</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ── MAIN CONTENT ── -->
+    <main class="app-main" id="admin-main">
+      <!-- Dashboard tab -->
+      <div id="admin-tab-dashboard">
+
+        <!-- Page header -->
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">Dashboard</h1>
+            <p class="page-sub" id="dashboard-campaign-label">All campaigns</p>
+          </div>
+          <div class="page-header-actions">
+            <button class="btn-outline-dark" onclick="renderAdminView(true)">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M12 7A5 5 0 112 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M12 7l-2-2M12 7l2-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        <!-- D-Day countdown banner -->
+        <div id="dday-banner" style="display:none;margin-bottom:16px;"></div>
+
+        <!-- Stat cards -->
+        <div class="stat-row" id="admin-stats"></div>
+
+        <!-- Member progress summary mini-charts + deadline panel -->
+        <div class="dashboard-grid" id="dashboard-grid">
+          <!-- Member completion chart (injected by JS) -->
+          <div class="dash-card" id="dash-completion-card">
+            <div class="dash-card-header">
+              <div>
+                <div class="dash-card-title">Checklist Progress by Team Lead</div>
+                <div id="dash-completion-subtitle" style="font-size:11px;color:var(--blue);font-weight:600;margin-top:2px;"></div>
+              </div>
+              <span class="dash-card-badge" id="dash-completion-badge"></span>
+            </div>
+            <div id="dash-completion-chart"></div>
+          </div>
+
+          <!-- Active Checklists Breakdown panel — click a campaign to filter the whole dashboard -->
+          <div class="dash-card" id="dash-deadlines-card">
+            <!-- Recent Task Checks panel (renamed "Kit & RSP Checking by Team Lead") — placed
+                 above the Active Checklists list per admin preference. -->
+            <div id="dash-taskcheck-panel" style="display:none;margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid var(--border);"></div>
+
+            <div class="dash-card-header">
+              <div class="dash-card-title">Active Checklists</div>
+              <span class="dash-card-badge" id="dash-camps-badge"></span>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin:-4px 0 8px;">Click a campaign to view it across the whole dashboard</div>
+            <div id="dash-deadlines-list"></div>
+          </div>
+        </div>
+
+
+        <!-- Status filter for team progress -->
+        <div id="dash-status-filter-row" style="margin-bottom:8px;margin-top:4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <span style="font-size:12px;color:var(--text-muted);font-weight:500;">Filter by status:</span>
+          <button class="status-filter-btn active" data-status="all" onclick="filterByStatus(this,'all')">All</button>
+          <button class="status-filter-btn pending" data-status="pending" onclick="filterByStatus(this,'pending')">— Pending</button>
+          <button class="status-filter-btn in-progress" data-status="in-progress" onclick="filterByStatus(this,'in-progress')">⟳ In Progress</button>
+          <button class="status-filter-btn completed" data-status="completed" onclick="filterByStatus(this,'completed')">✓ Completed</button>
+        </div>
+
+        <!-- Team Progress Table -->
+        <div class="section-label" style="margin-bottom:10px;margin-top:4px;">
+          Team progress
+          <!-- Sort + search controls -->
+          <span style="float:right;display:flex;gap:8px;align-items:center;">
+            <input type="text" id="table-search" placeholder="Search member…" oninput="filterProgressTable()" style="font-size:12px;padding:4px 10px;border:1px solid var(--border);border-radius:6px;width:160px;background:var(--surface);color:var(--text);" />
+            <select id="table-sort" onchange="renderAdminView()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);">
+              <option value="name">Sort: Name</option>
+              <option value="overall_desc">Sort: % (High→Low)</option>
+              <option value="overall_asc">Sort: % (Low→High)</option>
+              <option value="lastactive">Sort: Last active</option>
+            </select>
+          </span>
+        </div>
+        <div id="admin-table-wrap">
+          <table class="progress-table" id="admin-table">
+            <thead>
+              <tr>
+                <th>Member</th>
+                <th>Campaign</th>
+                <th>D-5 Check</th>
+                <th>D-1 Check</th>
+                <th>Overall</th>
+                <th>Last active</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="admin-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Calendar tab -->
+      <div id="admin-tab-calendar" style="display:none;">
+        <div class="page-header">
+          <h1 class="page-title">Calendar</h1>
+        </div>
+        <div id="admin-calendar-host"></div>
+      </div>
+
+      <!-- Registration tab -->
+      <div id="admin-tab-registration" style="display:none;"></div>
+
+      <!-- Reports tab -->
+      <div id="admin-tab-reports" style="display:none;">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">Reports</h1>
+            <p class="page-sub">Campaign progress summaries — exportable to Excel</p>
+          </div>
+          <div class="page-header-actions" style="gap:10px;">
+            <select id="report-campaign-filter" onchange="renderReportTab()" style="font-size:13px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);">
+              <option value="">All campaigns</option>
+            </select>
+            <button class="btn-primary" style="width:auto;padding:8px 18px;background:#059669;" onclick="exportReportToExcel()">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style="margin-right:5px;vertical-align:-2px;"><rect x="1" y="1" width="12" height="12" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M4 7h6M7 4v6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+              Export Excel
+            </button>
+          </div>
+        </div>
+        <div id="report-status-filter-row" style="margin-bottom:14px;margin-top:4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <span style="font-size:12px;color:var(--text-muted);font-weight:500;">Filter by status:</span>
+          <button class="status-filter-btn active" data-status="all" onclick="filterReportByStatus(this,'all')">All</button>
+          <button class="status-filter-btn completed" data-status="completed" onclick="filterReportByStatus(this,'completed')">✓ Completed</button>
+          <button class="status-filter-btn in-progress" data-status="in-progress" onclick="filterReportByStatus(this,'in-progress')">⟳ In Progress</button>
+          <button class="status-filter-btn pending" data-status="pending" onclick="filterReportByStatus(this,'pending')">— Pending</button>
+        </div>
+        <div id="report-tab-content"></div>
+      </div>
+
+      <!-- Data tab -->
+      <div id="admin-tab-data" style="display:none;">
+        <div class="page-header">
+          <h1 class="page-title">Data &amp; RSP Checking</h1>
+        </div>
+        <div class="data-tab-grid">
+          <div class="data-card">
+            <div class="data-card-header">
+              <span class="data-card-icon">🎯</span>
+              <div>
+                <div class="data-card-title">Campaigns</div>
+                <div class="data-card-sub">Create and manage campaigns</div>
+              </div>
+              <button class="btn-primary admin-only" style="width:auto;font-size:12px;padding:6px 14px;" onclick="openCampaignChooser()">+ New Campaign</button>
+            </div>
+            <div id="data-campaigns-list" class="data-inner-list"></div>
+          </div>
+
+          <!-- Archived Campaigns — hidden behind a toggle so it stays out of the way -->
+          <div class="data-card">
+            <div class="data-card-header">
+              <span class="data-card-icon">📦</span>
+              <div>
+                <div class="data-card-title">Archived Campaigns</div>
+                <div class="data-card-sub"><span id="data-archived-count">0</span> archived · summary CSV downloaded on archive</div>
+              </div>
+              <button class="btn-ghost-light btn-sm" id="data-archived-toggle-btn" style="width:auto;font-size:12px;padding:6px 14px;" onclick="toggleArchivedCampaignsView()">View</button>
+            </div>
+            <div id="data-archived-campaigns-list" class="data-inner-list" style="display:none;"></div>
+          </div>
+          <!-- RSP & Kit Checking — above Checklist Progress -->
+          <div class="data-card data-card-full" style="border-color:rgba(15,118,110,0.35);">
+            <div class="data-card-header" style="background:rgba(15,118,110,0.06);border-bottom-color:rgba(15,118,110,0.2);">
+              <span class="data-card-icon">📦</span>
+              <div>
+                <div class="data-card-title">RSP &amp; Kit Checking</div>
+                <div class="data-card-sub">Send task checks and view member responses</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto;">
+                <button class="rsp-filter-btn active" data-filter="all" onclick="filterRspKitList(this,'all')">All</button>
+                <button class="rsp-filter-btn" data-filter="pending" onclick="filterRspKitList(this,'pending')">— Pending</button>
+                <button class="rsp-filter-btn" data-filter="in-progress" onclick="filterRspKitList(this,'in-progress')">⟳ In Progress</button>
+                <button class="rsp-filter-btn" data-filter="done" onclick="filterRspKitList(this,'done')">✓ Completed</button>
+                <button class="btn-primary" style="width:auto;font-size:12px;padding:6px 14px;background:#0F766E;" onclick="openTaskCheckModal()">+ Send Check</button>
+              </div>
+            </div>
+            <div id="data-rsp-kit-list" class="data-inner-list" style="padding:12px 16px;"></div>
+          </div>
+
+          <div class="data-card data-card-full">
+            <div class="data-card-header">
+              <span class="data-card-icon">✅</span>
+              <div>
+                <div class="data-card-title">Checklist Progress</div>
+                <div class="data-card-sub">Review or delete individual member progress</div>
+              </div>
+            </div>
+            <div id="data-checklists-list" class="data-inner-list"></div>
+          </div>
+
+          <div class="data-card data-card-danger admin-only">
+            <div class="data-card-header">
+              <span class="data-card-icon">⚠️</span>
+              <div>
+                <div class="data-card-title">Danger Zone</div>
+                <div class="data-card-sub">Irreversible actions — proceed with caution</div>
+              </div>
+            </div>
+            <div style="padding:16px;">
+              <div class="danger-action-row">
+                <div>
+                  <div style="font-size:13px;font-weight:600;color:#FCA5A5;">Delete ALL Campaigns &amp; Assignments</div>
+                  <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Permanently removes all campaigns and their member assignments. Checklist data is also cleared.</div>
+                </div>
+                <button class="btn-danger" onclick="openDeleteAllCampaignsModal()">🗑 Delete All Campaigns</button>
+              </div>
+              <div class="danger-action-row" style="margin-top:12px;">
+                <div>
+                  <div style="font-size:13px;font-weight:600;color:#FCA5A5;">Delete ALL Checklist Progress</div>
+                  <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Permanently wipes every member's D-5 and D-1 progress across all campaigns.</div>
+                </div>
+                <button class="btn-danger" onclick="openDeleteAllChecklistsModal()">🗑 Delete All Checklists</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Members tab -->
+      <div id="admin-tab-members" style="display:none;">
+        <div class="page-header">
+          <h1 class="page-title">Members</h1>
+          <p class="page-sub">Team leads, their groups, and individual members</p>
+        </div>
+        <div class="data-tab-grid">
+          <div class="data-card data-card-full">
+            <div class="data-card-header" style="flex-wrap:wrap;gap:8px;">
+              <span class="data-card-icon">👤</span>
+              <div style="flex:1;min-width:120px;">
+                <div class="data-card-title">Members</div>
+                <div class="data-card-sub">Add and remove team members and team leads</div>
+              </div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                <button class="btn-outline-dark admin-only" style="font-size:12px;padding:6px 14px;" onclick="openTeamLeadModal()">👥 Team Leads</button>
+                <button class="btn-outline-dark admin-only" style="font-size:12px;padding:6px 14px;" onclick="openManagerModal()">🧭 Managers</button>
+                <button class="btn-primary admin-only" style="width:auto;font-size:12px;padding:6px 14px;" onclick="openMemberModal()">+ Add Member</button>
+                <button class="btn-outline admin-only" style="font-size:12px;padding:6px 14px;" onclick="openImportMembersModal()">Bulk Add</button>
+                <button class="btn-outline" style="font-size:12px;padding:6px 14px;" onclick="exportMembersToExcel()">📤 Export Usernames</button>
+                <button id="remove-selected-members-btn" class="btn-ghost-light admin-only" style="font-size:12px;padding:6px 14px;color:#DC2626;border-color:#FCA5A5;display:none;" onclick="removeSelectedMembers()">🗑 Remove Selected</button>
+              </div>
+            </div>
+            <div id="data-managers-list" class="data-inner-list"></div>
+            <div id="data-members-list" class="data-inner-list"></div>
+          </div>
+
+          <!-- Regular Members card (separate from Team Leads list above) -->
+          <div class="data-card data-card-full">
+            <div class="data-card-header" style="flex-wrap:wrap;gap:8px;">
+              <span class="data-card-icon">🧑‍🤝‍🧑</span>
+              <div style="flex:1;min-width:120px;">
+                <div class="data-card-title">Members List</div>
+                <div class="data-card-sub">All individual members</div>
+              </div>
+            </div>
+            <div id="data-regular-members-list" class="data-inner-list"></div>
+          </div>
+        </div>
+      </div>
+      <div id="admin-tab-alerts" style="display:none;">
+        <div class="page-header">
+          <h1 class="page-title">Alerts</h1>
+          <p class="page-sub">Members who have not started their checklist</p>
+        </div>
+        <div id="alerts-full-list"></div>
+      </div>
+
+      <!-- Checklist Templates tab -->
+      <div id="admin-tab-checklist" style="display:none;">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">Checklist Templates</h1>
+            <p class="page-sub">Create and manage named checklist templates for campaigns</p>
+          </div>
+          <div class="page-header-actions">
+            <button class="btn-primary" style="width:auto;padding:8px 18px;" onclick="openNewTemplateModal()">+ New Template</button>
+          </div>
+        </div>
+        <div id="checklist-tab-content"></div>
+      </div>
+
     </main>
-
-    <!-- Admin workspace (shown when an Admin nav item is active) -->
-    <section class="workspace" id="workspace" hidden>
-      <div class="adminpanel__status" id="adminStatus"></div>
-      <div id="workspaceBody"></div>
-    </section>
-
-    <footer class="footer">
-      <p>Generated automatically from the source deck. Spot something off? Flag it to the PIC &#8212; the source file is the fix point, not this page. Use the Admin section in the sidebar to add entries or generate an email.</p>
-    </footer>
   </div>
 
-</div>
+  <!-- ═══════════ USER SCREEN ═══════════ -->
+  <div id="user-screen" class="screen app-layout" style="display:none;">
 
-<div class="scrim" id="scrim" hidden></div>
-<div id="printArea"></div>
+    <!-- ── USER SIDEBAR ── -->
+    <aside class="sidebar" id="user-sidebar">
+      <div class="sidebar-header">
+        <span class="logo-mark sm">TR</span>
+        <div class="sidebar-brand" id="user-sidebar-brand-text">
+          <div class="sidebar-title">Trackory</div>
+          <div class="sidebar-sub">Member</div>
+        </div>
+        <button class="sidebar-toggle" onclick="toggleUserSidebar()" title="Collapse sidebar">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 12L6 8l4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
 
-<!-- ===================== PRESENTATION OVERLAY ===================== -->
-<div class="present" id="presentOverlay" hidden>
-  <div class="present__bar">
-    <div class="present__crumbs" id="presentCrumbs"></div>
-    <div class="present__controls">
-      <label class="present__datepick">
-        <span class="present__datepick-label">Input date</span>
-        <select id="presentDateSelect" aria-label="Select input date to present"></select>
-      </label>
-      <span class="present__counter" id="presentCounter"></span>
-      <button type="button" class="present__btn" id="presentPrev" aria-label="Previous">&#8592;</button>
-      <button type="button" class="present__btn" id="presentNext" aria-label="Next">&#8594;</button>
-      <button type="button" class="present__btn present__btn--close" id="presentClose" aria-label="Exit presentation">&#10005;</button>
+      <!-- User nav -->
+      <nav class="sidebar-nav">
+        <button class="nav-item active" id="user-navbtn-dashboard" onclick="showUserTab('dashboard')" title="Team Overview">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><rect x="2" y="2" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.5"/><rect x="11" y="2" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.5"/><rect x="2" y="11" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.5"/><rect x="11" y="11" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.5"/></svg>
+          <span class="nav-label">Overview</span>
+        </button>
+        <button class="nav-item" id="user-navbtn-calendar" onclick="showUserTab('calendar')" title="Calendar">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><rect x="2" y="4" width="16" height="14" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M6 2v4M14 2v4M2 9h16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <span class="nav-label">Calendar</span>
+        </button>
+        <button class="nav-item" id="user-navbtn-checklist" onclick="showUserTab('checklist')" title="Checklist">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><path d="M7 10l2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><rect x="2" y="2" width="16" height="16" rx="2" stroke="currentColor" stroke-width="1.5"/></svg>
+          <span class="nav-label">Checklist</span>
+        </button>
+        <button class="nav-item" id="user-navbtn-broadcasts" onclick="openBroadcastFeed()" title="Messages" style="position:relative;">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><path d="M16 3L4 8v4l12 5V3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M4 10h-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <span class="nav-label">Messages</span>
+          <span class="nav-badge" id="user-broadcast-badge" style="display:none;"></span>
+        </button>
+      </nav>
+
+      <!-- User progress summary (shown when campaign is selected) -->
+      <div id="user-sidebar-progress" style="display:none;">
+        <div class="sidebar-divider"></div>
+        <div style="padding:0 12px;">
+          <div class="sidebar-section-label">My progress</div>
+          <div style="font-size:12px;color:var(--text-faint);margin-bottom:6px;" id="user-sidebar-campaign-label"></div>
+          <div class="progress-summary">
+            <span id="user-progress-label" style="font-size:11px;">0 / 0</span>
+            <span id="user-progress-pct" style="font-size:11px;font-family:var(--mono);">0%</span>
+          </div>
+          <div class="progress-track"><div class="progress-fill" id="user-progress-fill"></div></div>
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        <button class="nav-item" onclick="openChangePasswordModal()" title="Change Password">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><rect x="5" y="9" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/><path d="M7 9V6a3 3 0 016 0v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <span class="nav-label">Change Password</span>
+        </button>
+        <div class="sidebar-signout-row">
+          <button class="nav-item nav-item-signout" onclick="handleLogout()" title="Sign out">
+            <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><path d="M13 15l4-4-4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M17 11H7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M7 4H4a1 1 0 00-1 1v10a1 1 0 001 1h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            <span class="nav-label">Sign out</span>
+          </button>
+          <span class="sidebar-username" id="user-name-display">Loading…</span>
+        </div>
+      </div>
+    </aside> -->
+    <main class="app-main" id="user-main">
+      <!-- Team Overview / Dashboard view -->
+      <div id="user-dashboard-view" style="display:none;">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title" id="user-dashboard-title">Team Overview</h1>
+            <p class="page-sub" id="user-dashboard-sub">Your team's checklist progress at a glance</p>
+          </div>
+          <div class="page-header-actions">
+            <button class="btn-outline-dark" onclick="renderUserDashboard()">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M12 7A5 5 0 112 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M12 7l-2-2M12 7l2-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Refresh
+            </button>
+          </div>
+        </div>
+        <div id="user-team-stats" class="stat-row" style="margin-bottom:20px;"></div>
+        <div id="user-team-campaign-breakdown"></div>
+      </div>
+
+      <!-- Calendar view -->
+      <div id="user-calendar-view" style="display:none;"></div>
+
+      <!-- Checklist view -->
+      <div id="user-checklist-view" style="display:none;">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title" id="user-campaign-name">Checklist</h1>
+            <p class="page-sub" id="user-campaign-sub">Select a campaign to begin</p>
+          </div>
+          <div class="page-header-actions">
+            <select id="user-campaign-select" onchange="loadUserChecklist()" style="max-width:280px;">
+              <option value="">Select campaign…</option>
+            </select>
+          </div>
+        </div>
+        <div id="user-progress-bar-wrap" style="display:none;">
+          <!-- progress moved to sidebar -->
+        </div>
+        <div id="user-progress-banner" style="display:none;margin-bottom:16px;"></div>
+        <div id="user-rspkit-banner" style="display:none;margin-bottom:16px;"></div>
+        <div id="user-no-campaign" class="empty-state">
+          <div class="empty-icon">📋</div>
+          <p>Select a campaign above to start your checklist.</p>
+        </div>
+        <div id="user-checklist" style="display:none;"></div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ══════════════════════════════════════
+       ALL MODALS (unchanged from original)
+  ══════════════════════════════════════ -->
+
+  <!-- Campaign Creation Chooser — asks HOW before it asks WHAT -->
+  <div id="campaign-chooser-overlay" style="display:none;" onclick="closeCampaignChooser(event)">
+    <div class="modal" style="max-width:560px;">
+      <div class="modal-header">
+        <h3>New Campaign</h3>
+        <button class="btn-ghost-light" onclick="closeCampaignChooser()">✕</button>
+      </div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">
+        How would you like to set this up?
+      </div>
+
+      <div class="chooser-grid">
+        <button class="chooser-card" onclick="chooseCampaignMode('manual')">
+          <span class="chooser-icon">✍️</span>
+          <span class="chooser-title">Create manually</span>
+          <span class="chooser-desc">
+            Name it, pick the members yourself, set the D-Day and deadline.
+            Optionally upload an Excel to pre-fill brands.
+          </span>
+          <span class="chooser-tag">1 campaign</span>
+        </button>
+      </div>
+
+      <div id="chooser-roster-note"></div>
     </div>
   </div>
-  <div class="present__stage" id="presentStage"></div>
-  <div class="present__progress" id="presentProgress"></div>
-</div>
 
-<script>window.__NEWSLETTER_DATA__ = {"allowed_platforms": ["Lazada", "Shopee", "Tiktok", "Zalora", "Others"], "allowed_regions": ["Indonesia", "Malaysia", "Philippines", "Singapore", "Thailand", "Vietnam"], "warnings": ["Slide 12: title guessed from body text — please verify."], "slides": [{"id": "s001", "platform": "Tiktok", "region": "Singapore", "date": "2026-06-29", "date_range": "Jun 29 – Jul 3", "title": "Avoid Making Weight Management Claims", "link": "https://seller-sg.tiktok.com/university/essay?knowledge_id=8212574140335874&role=1&course_type=1&from=search&identity=1", "body": [{"type": "para", "text": "We are updating our policy for weight management and muscle gain content to help creators and sellers promote Health and Wellness products responsibly."}, {"type": "header", "text": "What's changing?"}, {"type": "para", "text": "Additional weight management claims and behaviours are not allowed and may lead to violations. This means sellers and creators should be more careful when promoting products with weight loss, fat loss, or muscle gain benefits."}, {"type": "header", "text": "What to avoid"}, {"type": "para", "text": "❌ Avoid claims that a product works like weight loss medicine."}, {"type": "bullet", "text": "“Nature's Ozempic”"}, {"type": "bullet", "text": "\"GLP-1 booster\", \"GLP-1 support\""}, {"type": "para", "text": "❌ Avoid encouraging unsafe exercise for weight loss or muscle gain, despite injury or illness."}, {"type": "bullet", "text": "\"I have a bad flu but I still need to run to lose weight“"}, {"type": "bullet", "text": "\"No rest days, even when you're injured“"}, {"type": "bullet", "text": "\"Push through the pain to burn fat\""}, {"type": "para", "text": "❌ Avoid encouraging misuse of a product for weight loss or muscle gain."}, {"type": "bullet", "text": "\"The label says take 2, but I take 4 for faster results“"}, {"type": "bullet", "text": "\"Double the dose to slim down faster\""}, {"type": "para", "text": "❌ Avoid saying a product can change someone's body shape by altering internal body structure."}, {"type": "bullet", "text": "\"Wear this waist trainer and you'll become skinny“"}, {"type": "bullet", "text": "\"Use this waist trainer to tighten your body and create curves\""}, {"type": "para", "text": "❌ Avoid promoting body scales or food scales with high-risk weight management claims or idealised body appearances."}, {"type": "bullet", "text": "\"Track every gram of food to get skinny fast“"}, {"type": "bullet", "text": "\"I use these food scales to restrict my diet to very low calories\""}], "slide_num": 2}, {"id": "s002", "platform": "Tiktok", "region": "Malaysia", "date": "2026-06-29", "date_range": "Jun 29 – Jul 3", "title": "Introducing TIKTOK Organization Account", "link": "https://seller-my.tiktok.com/university/essay?btm_pre_unit_params=%7B%22outreach_task_id%22%3A%2259659916352516%22%2C%22outreach_channel_type%22%3A3%2C%22outreach_message_category_type%22%3A3020000%2C%22outreach_message_mapping_id%22%3A%228695b675-1c41-4662-a3d3-df0d449dec1a%22%7D&identity=1&knowledge_id=5453247375247105&lang=en", "body": [{"type": "para", "text": "Starting on 1 July, TikTok organization account will be available for corporate sellers on TikTok Shop."}, {"type": "header", "text": "What is organization account?"}, {"type": "para", "text": "A TikTok organization account is a TikTok account type designed for businesses. It provides a more secure and business-friendly way to manage your TikTok Shop official account."}, {"type": "image", "file": "slide4-1.png"}, {"type": "image", "file": "slide4-2.png"}, {"type": "image", "file": "slide5-3.png"}], "slide_num": 4}, {"id": "s003", "platform": "Tiktok", "region": "Malaysia", "date": "2026-06-29", "date_range": "Jun 29 – Jul 3", "title": "The Intellectual Property Protection Center (IPPC)", "link": "https://seller-my.tiktok.com/university/essay?identity=1&role=1&knowledge_id=7736064500582161&from=policy", "body": [{"type": "para", "text": "The IPPC is a platform for Intellectual Property (IP) rights owners to protect their IP rights on TikTok Shop. Rights owners can use the IPPC to:"}, {"type": "bullet", "text": "Register their IP assets (by submitting relevant documents, registrations, certifications, etc.)"}, {"type": "bullet", "text": "Search TikTok Shop products, videos, and livestreams to identify possible IP infringements"}, {"type": "bullet", "text": "Submit and track the progress of their complaints about possible IP infringements"}, {"type": "header", "text": "The IPPC User Flow"}, {"type": "table", "rows": [["Step", "Action", "Section"], ["1", "Create an account", "Step 1"], ["2", "Create or join an organization & verify identity", "Step 2"], ["3", "Register your IP asset", "Step 3"], ["4", "Search products & e-commerce content for IPR infringement", "Step 4"], ["5", "Submit a complaint", "Step 5"], ["6", "Monitor the outcome of your complaint", "Step 6"]]}], "slide_num": 6}, {"id": "s004", "platform": "Lazada", "region": "Philippines", "date": "2026-06-29", "date_range": "Jun 29 – Jul 3", "title": "[Important Update] Buyer Data Protection Enhancement", "link": "https://sellercenter.lazada.com.ph/helpcenter/s/faq/knowledge?spm=aligroup_teambition.aligroup-tb-project-page.0.0.e736717dtFadCu&categoryId=1000028192&m_station=BuyerHelp&questionId=1000147128", "body": [{"type": "para", "text": "Effective July 3, 2026, selected buyer information will be masked on ISV, in line with the buyer data protection measures currently implemented in Lazada Seller Center. This enhancement is part of Lazada's ongoing commitment to maintaining a safe and trusted marketplace for both buyers and sellers."}, {"type": "header", "text": "What's Changing?"}, {"type": "para", "text": "Certain buyer information will no longer be fully displayed on ISV, including:"}, {"type": "bullet", "text": "Buyer Name"}, {"type": "bullet", "text": "Buyer Address"}, {"type": "bullet", "text": "Buyer Phone Number"}, {"type": "para", "text": "This applies to areas such as:"}, {"type": "bullet", "text": "Order Details"}, {"type": "bullet", "text": "Batch Export Files"}, {"type": "bullet", "text": "Invoice Printing"}, {"type": "header", "text": "Why Is This Change Being Made?"}, {"type": "para", "text": "The update is designed to better protect buyers' personal information and reduce the risk of unauthorized access, misuse, fraud, or data leakage outside of the Lazada platform."}, {"type": "header", "text": "Impact on Seller Operations"}, {"type": "para", "text": "There will be no impact to your day-to-day operations."}, {"type": "para", "text": "You will continue to be able to:"}, {"type": "bullet", "text": "Process and fulfil orders as usual"}, {"type": "bullet", "text": "Arrange deliveries"}, {"type": "bullet", "text": "Manage order-related operations"}, {"type": "bullet", "text": "Communicate with buyers through Lazada-supported channels"}, {"type": "header", "text": "What Do You Need to Do?"}, {"type": "para", "text": "No action is required from sellers at this time."}, {"type": "para", "text": "However, if you are using any internal systems, integrations, or workflows that rely on unmasked buyer information from ISV, we recommend reviewing them before the effective date."}], "slide_num": 8}, {"id": "s005", "platform": "Shopee", "region": "Philippines", "date": "2026-06-29", "date_range": "Jun 29 – Jul 3", "title": "Update: Orders History", "link": "https://seller.shopee.ph/edu/article/13461", "body": [{"type": "para", "text": "Starting June 22, orders created more than 2 years ago can be accessed by exporting an order report from the My Orders page in Seller Centre."}, {"type": "para", "text": "To access orders created more than 2 years ago, go to the My Orders page and click the Export button in the top-right corner to download an order report."}, {"type": "image", "file": "slide9-4.png"}], "slide_num": 9}, {"id": "s006", "platform": "Shopee", "region": "Thailand", "date": "2026-06-29", "date_range": "Jun 29 – Jul 3", "title": "Next Day Delivery", "link": "https://seller.shopee.co.th/edu/article/26486", "body": [{"type": "header", "text": "Next Day Delivery — Fast Shipping, Arrives Tomorrow"}, {"type": "para", "text": "Next Day Delivery is a program designed to boost sales by elevating the buyer experience through a \"Fast Shipping, Arrives Tomorrow\" service. This serves as a key driver for purchase decisions and creates a competitive advantage for sellers. The system assists sellers by forecasting order trends so they can prepare in advance, ensuring products reach buyers promptly — ultimately increasing conversion opportunities and generating consistent revenue."}, {"type": "header", "text": "Summary of Differences: Next Day Delivery vs. Shopee Shipping Types"}, {"type": "table", "rows": [["", "Standard Delivery", "Next Day Delivery", "FBS (Fulfillment By Shopee)", "Express / Instant Delivery"], ["Service Area", "Nationwide", "Provincial (outside Bangkok)", "Nationwide", "Bangkok, vicinities, and select provinces"], ["Delivery Time", "Bangkok & vicinity: 1–2 days / Provincial: 2–3 days", "Provincial areas: next day", "Bangkok & vicinity: 1–2 days / Provincial: 1–3 days", "Same day"], ["Service Fee", "Vehicle pickup fee (30 THB/day) if fewer than 6 orders/day", "No fee", "Packaging fee + daily space rental fee", "No fee"], ["Operations Overview", "Seller packs and ships", "Seller packs and ships", "Seller sends stock to Shopee warehouse; warehouse packs and ships", "Seller packs and ships"], ["Shipped By", "SPX Express / Flash Express / DHL Domestic", "SPX Express / Flash Express / DHL Domestic", "SPX Express / Flash Express / DHL Domestic", "Delivery companies and ShopeeFood"], ["Pickup/Delivery Schedule", "According to standard Day to Ship policy", "According to standard Day to Ship policy", "According to standard Day to Ship policy", "According to standard Day to Ship policy"]]}], "slide_num": 12}]};</script>
-<script src="script.js"></script>
+  <!-- Calendar Entry Modal -->
+  <div id="cal-entry-overlay" style="display:none;" onclick="closeCalEntryModal(event)">
+    <div class="modal" style="max-width:520px;">
+      <div class="modal-header">
+        <h3 id="cal-modal-title">Add Event</h3>
+        <button class="btn-ghost-light" onclick="closeCalEntryModal()">✕</button>
+      </div>
+      <input type="hidden" id="cal-entry-personal-mode" value="0" />
+      <!-- Title is auto-composed from Campaign + Region + Platform + Milestone
+           for standardized naming. The raw input is kept (hidden for campaign
+           events, shown for personal notes) so personal events can still be
+           free-typed and the compose logic has one field to write to. The
+           auto-name note lives OUTSIDE the field so it stays visible for
+           campaign events even while the raw input is hidden. -->
+      <div class="field" id="cal-entry-title-field">
+        <label>Title</label>
+        <input type="text" id="cal-entry-title-input" placeholder="e.g. 11.11 D-Day" />
+      </div>
+      <div id="cal-entry-title-auto-note" style="font-size:12px;color:var(--text-muted);margin:-4px 0 12px;padding:8px 10px;background:var(--bg-soft,#F8FAFC);border-radius:8px;display:none;">
+        Auto-named from Campaign · Region · Platform · Milestone below.
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div>
+          <div class="field" style="margin-bottom:6px;">
+            <label>Start Date</label>
+            <input type="date" id="cal-entry-date" onchange="_calValidateEntry()" />
+          </div>
+          <div class="field">
+            <label style="font-size:11px;color:var(--text-muted);">Start Time (optional)</label>
+            <div style="display:grid;grid-template-columns:1fr 1fr 80px;gap:6px;align-items:center;">
+              <select id="cal-entry-start-hour" onchange="_calValidateEntry()" style="font-size:13px;padding:5px 8px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);">
+                <option value="">HH</option>
+                <option value="01">01</option><option value="02">02</option><option value="03">03</option>
+                <option value="04">04</option><option value="05">05</option><option value="06">06</option>
+                <option value="07">07</option><option value="08">08</option><option value="09">09</option>
+                <option value="10">10</option><option value="11">11</option><option value="12">12</option>
+              </select>
+              <select id="cal-entry-start-minute" onchange="_calValidateEntry()" style="font-size:13px;padding:5px 8px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);">
+                <option value="">MM</option>
+                <option value="00">00</option><option value="15">15</option>
+                <option value="30">30</option><option value="45">45</option>
+              </select>
+              <select id="cal-entry-start-ampm" onchange="_calValidateEntry()" style="font-size:13px;padding:5px 8px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);">
+                <option value="">—</option>
+                <option value="AM">AM</option>
+                <option value="PM">PM</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="field" style="margin-bottom:6px;">
+            <label>End Date (optional)</label>
+            <input type="date" id="cal-entry-enddate" />
+          </div>
+          <div class="field">
+            <label style="font-size:11px;color:var(--text-muted);">End Time (optional)</label>
+            <div style="display:grid;grid-template-columns:1fr 1fr 80px;gap:6px;align-items:center;">
+              <select id="cal-entry-end-hour" style="font-size:13px;padding:5px 8px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);">
+                <option value="">HH</option>
+                <option value="01">01</option><option value="02">02</option><option value="03">03</option>
+                <option value="04">04</option><option value="05">05</option><option value="06">06</option>
+                <option value="07">07</option><option value="08">08</option><option value="09">09</option>
+                <option value="10">10</option><option value="11">11</option><option value="12">12</option>
+              </select>
+              <select id="cal-entry-end-minute" style="font-size:13px;padding:5px 8px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);">
+                <option value="">MM</option>
+                <option value="00">00</option><option value="15">15</option>
+                <option value="30">30</option><option value="45">45</option>
+              </select>
+              <select id="cal-entry-end-ampm" style="font-size:13px;padding:5px 8px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);">
+                <option value="">—</option>
+                <option value="AM">AM</option>
+                <option value="PM">PM</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div class="field">
+          <label>Campaign</label>
+          <select id="cal-entry-campaign-type" onchange="_calComposeTitle()">
+            <option value="double_digit">Double Digit</option>
+            <option value="mid_month">Mid-Month</option>
+            <option value="payday">PayDay</option>
+            <option value="other" selected>Other</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Region</label>
+          <select id="cal-entry-region" onchange="_calComposeTitle()">
+            <option value="">— None —</option>
+            <option value="MY">MY</option>
+            <option value="PH">PH</option>
+            <option value="VN">VN</option>
+            <option value="TH">TH</option>
+            <option value="SG">SG</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Platform</label>
+          <select id="cal-entry-platform" onchange="_calComposeTitle()">
+            <option value="">— None —</option>
+            <option value="lazada">Lazada</option>
+            <option value="shopee">Shopee</option>
+            <option value="tiktok">TikTok</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Milestone</label>
+          <select id="cal-entry-type" onchange="_calComposeTitle()">
+            <option value="teasing">Teasing</option>
+            <option value="dday">D-Day</option>
+            <option value="deadline">Deadline</option>
+            <option value="meeting">Meeting</option>
+            <option value="other" selected>Other</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div class="field" style="margin-bottom:0;">
+          <label>Repeats</label>
+          <select id="cal-entry-recurrence" onchange="toggleCalRecurrenceUntil()">
+            <option value="none">Does not repeat</option>
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+          </select>
+        </div>
+        <div class="field" id="cal-recurrence-until-wrap" style="margin-bottom:0;display:none;">
+          <label>Repeat Until (optional)</label>
+          <input type="date" id="cal-entry-recurrence-until" />
+        </div>
+      </div>
+      <div id="cal-recurrence-hint" style="font-size:11px;color:var(--text-muted);margin:-6px 0 10px;display:none;">
+        🔁 This is a repeating event — saving or deleting will ask whether to apply the change to just this date or the whole series.
+      </div>
+      <div class="field">
+        <label>Description (optional)</label>
+        <textarea id="cal-entry-desc" rows="2" placeholder="Add details…" style="resize:vertical;"></textarea>
+      </div>
+      <div id="cal-member-assign-wrap"></div>
+      <div id="cal-entry-error" class="error-msg" style="display:none;"></div>
+      <div id="cal-entry-required-hint" style="display:none;font-size:12px;color:#B45309;background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:8px 10px;margin-bottom:10px;"></div>
+      <div class="modal-actions" style="justify-content:space-between;">
+        <button id="cal-delete-btn" class="btn-ghost-light" style="color:#DC2626;border-color:#FCA5A5;display:none;" onclick="deleteCalEntry()">🗑 Delete</button>
+        <div style="display:flex;gap:10px;">
+          <button class="btn-ghost-light" onclick="closeCalEntryModal()">Cancel</button>
+          <button id="cal-entry-save" class="btn-primary" style="width:auto;" onclick="saveCalEntry()">💾 Save Event</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- New Campaign Modal -->
+  <div id="modal-overlay" style="display:none;" onclick="closeModal(event)">
+    <div class="modal">
+      <h3>New Campaign</h3>
+      <div class="field">
+        <label>Campaign Name</label>
+        <input type="text" id="new-campaign-name" placeholder="e.g. 11.11 Mega Sales" />
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div>
+          <div class="field" style="margin-bottom:6px;">
+            <label>D-Day / Event Date <span style="font-weight:400;color:var(--text-muted);font-size:12px;">(optional)</span></label>
+            <input type="date" id="new-campaign-dday" />
+          </div>
+          <div class="field">
+            <label style="font-size:11px;color:var(--text-muted);">Time</label>
+            <input type="time" id="new-campaign-dday-time" style="font-size:13px;" />
+          </div>
+        </div>
+        <div>
+          <div class="field" style="margin-bottom:6px;">
+            <label>Checklist Deadline <span style="font-weight:400;color:var(--text-muted);font-size:12px;">(optional)</span></label>
+            <input type="date" id="new-campaign-deadline" />
+          </div>
+          <div class="field">
+            <label style="font-size:11px;color:var(--text-muted);">Time</label>
+            <input type="time" id="new-campaign-deadline-time" style="font-size:13px;" />
+          </div>
+        </div>
+      </div>
+      <div class="field">
+        <label>Checklist Template <span style="font-weight:400;color:var(--text-muted);font-size:12px;">(optional)</span></label>
+        <select id="campaign-template-sel">
+          <option value="">None (use default checklist)</option>
+        </select>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Assigns this template's checklist to all members of this campaign.</div>
+      </div>
+
+      <!-- ── Per-Region Deadlines from Calendar (READ-ONLY PREVIEW) ──────
+           Shows what deadline each region will get, read straight from the
+           admin calendar (explicit Deadline event, else event start − 4h).
+           This is informational only: there is no Skip control. Regions whose
+           calendar event has no start time can't derive a deadline and will
+           fall back to the campaign-wide Checklist Deadline above. Fix a
+           flagged region by adding a start time to its calendar event. -->
+      <div class="field" style="border:1px dashed var(--border);border-radius:8px;padding:10px 12px;">
+        <label style="margin-bottom:6px;">🗓 Per-Region Deadlines from Calendar <span style="font-weight:400;color:var(--text-muted);font-size:12px;">(preview — each region's deadline is read from its calendar event; regions with no time fall back to the deadline above)</span></label>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+          <div>
+            <label style="font-size:11px;color:var(--text-muted);">Campaign Phase</label>
+            <select id="new-campaign-cal-type" style="font-size:13px;" onchange="refreshNewCampCalendarMap()">
+              <option value="">Any phase</option>
+              <option value="mid_month">Mid-Month</option>
+              <option value="payday">PayDay</option>
+              <option value="double_digit">Double Digit</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-muted);">Month</label>
+            <select id="new-campaign-cal-month" style="font-size:13px;" onchange="refreshNewCampCalendarMap()"></select>
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-muted);">Year</label>
+            <select id="new-campaign-cal-year" style="font-size:13px;" onchange="refreshNewCampCalendarMap()"></select>
+          </div>
+        </div>
+        <div id="new-campaign-cal-preview" style="margin-top:8px;"></div>
+      </div>
+      <div class="field">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+          <label style="margin-bottom:0;">Assign Members</label>
+          <button type="button" onclick="selectAllChips('member-assign-list')" style="font-size:11px;color:var(--blue);background:transparent;border:none;cursor:pointer;padding:0;font-weight:500;">Select All</button>
+        </div>
+        <div class="member-list" id="member-assign-list"></div>
+      </div>
+      <div class="field" style="border:1px dashed var(--border);border-radius:8px;padding:10px 12px;">
+        <label>📊 Bulk Assign Brands <span style="font-weight:400;color:var(--text-muted);font-size:12px;">(optional — upload Excel/CSV instead of doing it per-member)</span></label>
+        <input type="file" id="new-camp-bulk-file" accept=".xlsx,.xls,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" style="font-size:12px;padding:6px;" onchange="handleNewCampBulkFileChange(event)" />
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Columns: Username (or Name — first name works too), Brand, Platform, Region. Matched CDMs are auto-checked above and pre-filled with their entries. <a href="#" onclick="downloadBulkAssignTemplate();return false;" style="color:var(--blue);">Download template</a></div>
+        <div id="new-camp-bulk-preview" style="margin-top:8px;"></div>
+      </div>
+      <div id="modal-error" class="error-msg" style="display:none;"></div>
+      <div class="modal-actions">
+        <button class="btn-ghost-light" onclick="closeModal()">Cancel</button>
+        <button class="btn-primary" style="width:auto;" onclick="createCampaign()">Create Campaign</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Member Management Modal -->
+  <div id="member-modal-overlay" style="display:none;" onclick="closeMemberModal(event)">
+    <div class="modal">
+      <h3>+ Add Member</h3>
+      <p style="font-size:12px;color:var(--text-muted);margin:-6px 0 14px;">Manage existing members from the Members tab.</p>
+      <div class="field">
+        <label>Username</label>
+        <input type="text" id="new-member-username" placeholder="e.g. jsmith" />
+      </div>
+      <div class="field">
+        <label>Display Name</label>
+        <input type="text" id="new-member-name" placeholder="e.g. Jane Smith" />
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input type="password" id="new-member-password" placeholder="Set a password" />
+      </div>
+      <div id="member-modal-error" class="error-msg" style="display:none;"></div>
+      <div class="modal-actions">
+        <button class="btn-ghost-light" onclick="closeMemberModal()">Close</button>
+        <button class="btn-primary" style="width:auto;" onclick="addMember()">Add Member</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Broadcast Modal -->
+  <div id="broadcast-overlay" style="display:none;" onclick="closeBroadcastModal(event)">
+    <div class="modal" style="max-width:520px;">
+      <div class="modal-header">
+        <h3>📣 Broadcast</h3>
+        <button class="btn-ghost-light" onclick="closeBroadcastModal()">✕</button>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
+        <button class="btn-broadcast-type selected" data-type="shoutout" onclick="selectBroadcastType(this)">🏆 Shoutout</button>
+        <button class="btn-broadcast-type" data-type="nudge" onclick="selectBroadcastType(this)">⏰ Nudge</button>
+        <button class="btn-broadcast-type" data-type="custom" onclick="selectBroadcastType(this)">📢 Custom</button>
+      </div>
+      <div id="broadcast-quick-msgs" style="margin-bottom:12px;"></div>
+      <div class="field">
+        <label>Message</label>
+        <textarea id="broadcast-message" rows="3" placeholder="Write your message…" style="resize:vertical;"></textarea>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div class="field">
+          <label>To</label>
+          <select id="broadcast-member-sel"></select>
+        </div>
+        <div class="field">
+          <label>Campaign (optional)</label>
+          <select id="broadcast-campaign-sel"></select>
+        </div>
+      </div>
+      <div id="broadcast-error" class="error-msg" style="display:none;"></div>
+      <div class="modal-actions">
+        <button class="btn-ghost-light" onclick="closeBroadcastModal()">Cancel</button>
+        <button class="btn-primary" style="width:auto;" onclick="sendBroadcast()">📣 Send Broadcast</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Broadcast Feed Modal (for members) -->
+  <div id="broadcast-feed-overlay" style="display:none;" onclick="closeBroadcastFeed(event)">
+    <div class="modal" style="max-width:560px;">
+      <div class="modal-header">
+        <h3>📣 Messages</h3>
+        <button class="btn-ghost-light" onclick="closeBroadcastFeed()">✕</button>
+      </div>
+      <div id="broadcast-feed-list" style="max-height:60vh;overflow-y:auto;"></div>
+    </div>
+  </div>
+
+  <!-- Template Editor Modal (New / Edit template — centered, wide) -->
+  <div id="tmpl-editor-overlay" style="display:none;" onclick="closeTmplEditorModal(event)">
+    <div class="modal x-wide">
+      <div class="modal-header" style="flex-shrink:0;">
+        <div style="flex:1;min-width:0;">
+          <h3 id="tmpl-editor-modal-title">✏️ New Template</h3>
+          <div style="margin-top:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <input type="text" id="tmpl-name-input" placeholder="Template name (e.g. Mega Campaign, Non-Mega)" style="font-size:14px;font-weight:600;border:1px solid var(--border);border-radius:6px;padding:5px 12px;width:300px;color:var(--navy);" />
+            <select id="tmpl-d5-select" style="font-size:12px;padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);" title="Whether checklists using this template show a D-5 stage">
+              <option value="yes">With D-5</option>
+              <option value="no">No D-5</option>
+            </select>
+            <span id="tmpl-editor-stats" style="font-size:12px;color:var(--text-muted);"></span>
+          </div>
+        </div>
+        <button class="btn-ghost-light" onclick="closeTmplEditorModal()">✕</button>
+      </div>
+
+      <!-- Toolbar -->
+      <div style="display:flex;gap:8px;align-items:center;padding:8px 0 8px;flex-shrink:0;border-bottom:1px solid var(--border);margin-bottom:10px;">
+        <button class="btn-outline" style="background:var(--blue);border-color:var(--blue);color:#fff;font-size:12px;padding:5px 12px;" onclick="tmplAddSection()">+ Add Section</button>
+        <span style="font-size:11px;color:var(--text-faint);">Drag sections and items to reorder</span>
+      </div>
+
+      <!-- Sections list -->
+      <div id="tmpl-sections-container" style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding:2px 4px 4px 2px;"></div>
+
+      <div id="tmpl-editor-error" class="error-msg" style="display:none;margin-top:10px;flex-shrink:0;"></div>
+      <div class="modal-actions" style="flex-shrink:0;margin-top:14px;">
+        <button class="btn-ghost-light" onclick="closeTmplEditorModal()">Cancel</button>
+        <button class="btn-primary" style="width:auto;" onclick="saveTemplate()">💾 Save Template</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Delete Checklist Confirm Modal -->
+  <div id="delete-cl-overlay" style="display:none;" onclick="closeDeleteClModal(event)">
+    <div class="modal" style="max-width:420px;">
+      <h3 style="color:#DC2626;">🗑 Delete Checklist</h3>
+      <p id="delete-cl-msg" style="margin-bottom:1.5rem;color:var(--text-muted);font-size:14px;line-height:1.6;"></p>
+      <div id="delete-cl-error" class="error-msg" style="display:none;"></div>
+      <div class="modal-actions">
+        <button class="btn-ghost-light" onclick="closeDeleteClModal()">Cancel</button>
+        <button class="btn-primary" id="delete-cl-confirm-btn" style="width:auto;background:#DC2626;">Delete checklist</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Admin Review Modal -->
+  <div id="review-overlay" style="display:none;" onclick="closeReviewModal(event)">
+    <div class="modal x-wide">
+      <div class="modal-header">
+        <div>
+          <h3 id="review-member-name"></h3>
+          <div class="detail-sub" id="review-campaign-name"></div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button id="review-delete-btn" class="btn-ghost-light" style="color:#DC2626;border-color:#FCA5A5;" onclick="openDeleteClFromReview()">🗑 Delete Checklist</button>
+          <button class="btn-ghost-light" onclick="closeReviewModal()">✕ Close</button>
+        </div>
+      </div>
+      <div id="review-content"></div>
+    </div>
+  </div>
+
+  <div id="import-members-overlay" style="display:none;" onclick="closeImportMembersModal(event)">
+    <div class="modal" style="max-width:500px;">
+      <div class="modal-header">
+        <h3>📥 Import Members from Excel / CSV</h3>
+        <button class="btn-ghost-light" onclick="closeImportMembersModal()">✕</button>
+      </div>
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px;line-height:1.6;">
+        Upload an <strong>Excel (.xlsx)</strong> or <strong>CSV</strong> file with columns: <strong>Name, Password</strong> (header row required). <strong>Username</strong> is optional — auto-generated from name if not included.
+      </p>
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--text-muted);margin-bottom:14px;font-family:var(--mono);">
+        <strong>Excel columns:</strong> Name | Password (optional: Username)<br><br>
+        <span style="opacity:0.7;">CSV format also accepted:</span><br>
+        name,password<br>Jane Smith,pass123<br><br>
+        <span style="opacity:0.7;">(or with optional username column:)</span><br>
+        username,name,password<br>jsmith,Jane Smith,pass123
+      </div>
+      <div class="field">
+        <label>Select Excel (.xlsx) or CSV file</label>
+        <input type="file" id="import-csv-file" accept=".xlsx,.xls,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" style="font-size:13px;padding:6px;" onchange="handleImportCsvChange(event)" />
+      </div>
+      <div id="import-preview" style="max-height:200px;overflow-y:auto;margin-top:10px;"></div>
+      <div id="import-members-error" class="error-msg" style="display:none;"></div>
+      <div class="modal-actions">
+        <button class="btn-ghost-light" onclick="closeImportMembersModal()">Cancel</button>
+        <button id="import-members-btn" class="btn-primary" style="width:auto;" onclick="confirmImportMembers()">📥 Import Members</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Delete All Campaigns Modal -->
+  <div id="delete-all-camps-overlay" style="display:none;" onclick="closeDeleteAllCampaignsModal(event)">
+    <div class="modal" style="max-width:440px;">
+      <h3 style="color:#DC2626;">🗑 Delete ALL Campaigns</h3>
+      <p style="margin-bottom:0.75rem;color:var(--text-muted);font-size:14px;line-height:1.6;">
+        This will <strong>permanently delete ALL campaigns</strong>, their member assignments, and all associated checklist data.
+      </p>
+      <p style="margin-bottom:1.25rem;padding:10px 14px;background:rgba(220,38,38,0.08);border:1px solid rgba(220,38,38,0.25);border-radius:8px;font-size:13px;color:#FCA5A5;">
+        ⚠️ This action <strong>cannot be undone</strong>. All campaign records and checklist progress will be lost.
+      </p>
+      <div class="field">
+        <label style="color:#FCA5A5;font-size:13px;">Enter admin password to confirm</label>
+        <input type="password" id="delete-all-camps-password" placeholder="Admin password" style="border-color:rgba(220,38,38,0.4);" />
+      </div>
+      <div id="delete-all-camps-error" class="error-msg" style="display:none;"></div>
+      <div class="modal-actions">
+        <button class="btn-ghost-light" onclick="closeDeleteAllCampaignsModal()">Cancel</button>
+        <button class="btn-primary" id="delete-all-camps-confirm-btn" onclick="confirmDeleteAllCampaigns()" style="width:auto;background:#DC2626;">Delete ALL Campaigns</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Delete All Checklists Modal -->
+  <div id="delete-all-cl-overlay" style="display:none;" onclick="closeDeleteAllChecklistsModal(event)">
+    <div class="modal" style="max-width:440px;">
+      <h3 style="color:#DC2626;">🗑 Delete ALL Checklists</h3>
+      <p style="margin-bottom:0.75rem;color:var(--text-muted);font-size:14px;line-height:1.6;">
+        This will <strong>permanently delete ALL checklist progress</strong> for every member across every campaign.
+      </p>
+      <p style="margin-bottom:1.25rem;padding:10px 14px;background:rgba(220,38,38,0.08);border:1px solid rgba(220,38,38,0.25);border-radius:8px;font-size:13px;color:#FCA5A5;">
+        ⚠️ This action <strong>cannot be undone</strong>. All D-5 and D-1 statuses and notes will be lost.
+      </p>
+      <div class="field">
+        <label style="color:#FCA5A5;font-size:13px;">Enter admin password to confirm</label>
+        <input type="password" id="delete-all-cl-password" placeholder="Admin password" style="border-color:rgba(220,38,38,0.4);" />
+      </div>
+      <div id="delete-all-cl-error" class="error-msg" style="display:none;"></div>
+      <div class="modal-actions">
+        <button class="btn-ghost-light" onclick="closeDeleteAllChecklistsModal()">Cancel</button>
+        <button class="btn-primary" id="delete-all-cl-confirm-btn" onclick="confirmDeleteAllChecklists()" style="width:auto;background:#DC2626;">Delete ALL Checklists</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Registration Poll Modal (Admin) -->
+  <div id="reg-poll-overlay" style="display:none;" onclick="closeRegPollModal(event)">
+    <div class="modal" style="max-width:500px;">
+      <div class="modal-header">
+        <h3>📋 Create Registration Poll</h3>
+        <button class="btn-ghost-light" onclick="closeRegPollModal()">✕</button>
+      </div>
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.6;">
+        A "Register Now" broadcast will be sent to all members. They can register their brand, platform, and region — or opt to skip.
+      </p>
+      <div class="field">
+        <label>Campaign / Poll Name</label>
+        <input type="text" id="reg-poll-name" placeholder="e.g. 11.11 Mega Sale" />
+      </div>
+      <div class="field">
+        <label>Description (optional)</label>
+        <textarea id="reg-poll-desc" rows="2" style="resize:vertical;" placeholder="Any details for your team…"></textarea>
+      </div>
+      <div id="reg-poll-error" class="error-msg" style="display:none;"></div>
+      <div class="modal-actions">
+        <button class="btn-ghost-light" onclick="closeRegPollModal()">Cancel</button>
+        <button id="reg-poll-create-btn" class="btn-primary" style="width:auto;background:#059669;" onclick="createRegPoll()">📣 Create & Send</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Map Masterlist to CDM Modal (Admin) -->
+  <div id="map-masterlist-overlay" style="display:none;" onclick="closeMapMasterlistModal(event)">
+    <div class="modal x-wide">
+      <div class="modal-header">
+        <h3>🔗 Map Masterlist to CDM</h3>
+        <button class="btn-ghost-light" onclick="closeMapMasterlistModal()">✕</button>
+      </div>
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px;line-height:1.6;">
+        Pick a CDM, tick the brands/platforms/regions they'll handle from your masterlist, then add. Repeat for each CDM — the table below builds your ready-to-use list.<br>
+        Or, if your masterlist has a <strong>PIC</strong> column, click "Auto-match by PIC" to match those names straight to your members.
+      </p>
+      <div style="margin-bottom:14px;">
+        <button class="btn-outline" style="width:auto;" onclick="autoMatchMasterlistByPic()">⚡ Auto-match by PIC</button>
+      </div>
+
+      <div style="display:grid;grid-template-columns:220px 1fr;gap:16px;align-items:start;">
+        <div>
+          <div class="field">
+            <label>CDM</label>
+            <select id="map-cdm-sel"></select>
+          </div>
+          <button class="btn-primary" style="width:100%;margin-top:8px;" onclick="addMapSelectionToWorking()">+ Add Selected</button>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">Tick items on the right, pick the CDM, then click Add. You can keep adding for multiple CDMs before generating the file.</div>
+        </div>
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <label style="margin-bottom:0;font-size:13px;font-weight:600;">Masterlist — tick brand/platform/region combos</label>
+            <input type="text" id="map-brand-filter" placeholder="Filter brand…" oninput="filterMapBrandChecklist(this.value)" style="font-size:12px;padding:5px 10px;width:160px;" />
+          </div>
+          <div id="map-brand-checklist" style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--surface2);"></div>
+        </div>
+      </div>
+
+      <div style="margin-top:16px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <label style="margin-bottom:0;font-size:13px;font-weight:600;">Mapping list (<span id="map-working-count">0</span>)</label>
+          <button class="btn-ghost-light" style="font-size:11px;padding:4px 10px;" onclick="clearMapWorkingRows()">Clear all</button>
+        </div>
+        <div id="map-working-table" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;"></div>
+      </div>
+
+      <div id="map-masterlist-error" class="error-msg" style="display:none;"></div>
+      <div class="modal-actions">
+        <button class="btn-ghost-light" onclick="closeMapMasterlistModal()">Cancel</button>
+        <button class="btn-outline" style="width:auto;" onclick="downloadMapAsExcel()">⬇ Download as Excel</button>
+        <button class="btn-primary" style="width:auto;background:#4F46E5;" onclick="useMapInBulkAssign()">📊 Use in Bulk Assign →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bulk Assign Brands via Excel Modal (Admin) -->
+  <div id="bulk-assign-overlay" style="display:none;" onclick="closeBulkAssignModal(event)">
+    <div class="modal" style="max-width:620px;">
+      <div class="modal-header">
+        <h3>📊 Bulk Assign Brands via Excel</h3>
+        <button class="btn-ghost-light" onclick="closeBulkAssignModal()">✕</button>
+      </div>
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px;line-height:1.6;">
+        Upload an Excel/CSV file mapping each CDM to the brands, platforms, and regions they'll handle. Entries are auto-generated — no poll needed.
+      </p>
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--text-muted);margin-bottom:14px;font-family:var(--mono);">
+        <strong>Columns:</strong> Username (or Name) | Brand | Platform | Region<br>
+        <span style="color:var(--text-faint);">First name alone also works if it's unique among your members — full username is safest.</span><br><br>
+        username,brand,platform,region<br>jane,Marc Jacobs,Lazada,SG<br>jane,Marc Jacobs,Shopee,SG<br>mark,Marc Jacobs,Lazada,MY
+        <div style="margin-top:8px;"><a href="#" onclick="downloadBulkAssignTemplate();return false;" style="color:var(--blue);font-family:var(--font);">⬇ Download blank template (.csv)</a> &nbsp;·&nbsp; <a href="#" onclick="exportMembersToExcel();return false;" style="color:var(--blue);font-family:var(--font);">📤 Export CDM usernames (.xlsx)</a></div>
+      </div>
+
+      <div class="field">
+        <label>Select Excel (.xlsx) or CSV file</label>
+        <input type="file" id="bulk-assign-file" accept=".xlsx,.xls,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" style="font-size:13px;padding:6px;" onchange="handleBulkAssignFileChange(event)" />
+      </div>
+
+      <div class="field">
+        <label>Assign to</label>
+        <select id="bulk-assign-campaign-sel" onchange="onBulkAssignCampaignChange()">
+          <option value="__new__">➕ Create a new campaign</option>
+        </select>
+      </div>
+      <div class="field" id="bulk-assign-new-name-field">
+        <label>New Campaign Name</label>
+        <input type="text" id="bulk-assign-new-name" placeholder="e.g. 11.11 Mega Sale" />
+      </div>
+      <!-- Campaign-wide checklist deadline. Applies to every region that
+           doesn't get its own per-region deadline from the calendar, so no
+           region is ever left un-deadlined (which would make it invisible in
+           the overdue/pending trace). Shown for new campaigns only — existing
+           campaigns keep the deadline they already have. -->
+      <div class="field" id="bulk-assign-deadline-field">
+        <label>Checklist Deadline</label>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="date" id="bulk-assign-deadline-date" style="flex:1;" />
+          <input type="time" id="bulk-assign-deadline-time" style="flex:1;" />
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">
+          Regions with a timed calendar event use their own deadline; everyone else uses this. Leave blank only if every region has its own calendar deadline.
+        </div>
+      </div>
+
+      <div id="bulk-assign-preview" style="max-height:240px;overflow-y:auto;margin-top:6px;"></div>
+      <div id="bulk-assign-error" class="error-msg" style="display:none;"></div>
+      <div class="modal-actions">
+        <button class="btn-ghost-light" onclick="closeBulkAssignModal()">Cancel</button>
+        <button id="bulk-assign-btn" class="btn-primary" style="width:auto;background:#4F46E5;" onclick="confirmBulkAssign()" disabled>📊 Generate Entries</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Member Registration Form Modal -->
+  <div id="user-reg-overlay" style="display:none;" onclick="closeUserRegModal(event)">
+    <div class="modal" style="max-width:540px;">
+      <div class="modal-header">
+        <div>
+          <h3>📋 Brand Registration</h3>
+          <div id="user-reg-poll-title" style="font-size:13px;font-weight:600;color:var(--blue);margin-top:2px;"></div>
+        </div>
+        <button class="btn-ghost-light" onclick="closeUserRegModal()">✕</button>
+      </div>
+      <p id="user-reg-poll-desc" style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.6;"></p>
+      <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px;">Your registrations</div>
+      <div style="overflow-x:auto;max-height:360px;overflow-y:auto;">
+        <table class="ureg-table" id="user-reg-table">
+          <thead>
+            <tr>
+              <th style="width:36px;">#</th>
+              <th>Brand <span style="font-weight:400;opacity:0.7;">(optional)</span></th>
+              <th>Platform</th>
+              <th>Region</th>
+              <th style="width:36px;"></th>
+            </tr>
+          </thead>
+          <tbody id="user-reg-form-body"></tbody>
+        </table>
+      </div>
+      <button class="btn-outline" onclick="addUserRegEntry()" style="margin-top:10px;background:transparent;color:var(--blue);border-color:var(--blue);font-size:12px;padding:5px 12px;">+ Add row</button>
+      <div class="field" style="margin-top:16px;">
+        <label>Note (optional)</label>
+        <input type="text" id="user-reg-note" placeholder="Any comments for the admin…" style="font-size:13px;" />
+      </div>
+      <div id="user-reg-error" class="error-msg" style="display:none;"></div>
+      <div class="modal-actions" style="justify-content:space-between;flex-wrap:wrap;gap:8px;">
+        <button class="btn-ghost-light" style="color:#D97706;border-color:#D97706;" onclick="skipUserRegistration()">⏭ Skip Campaign</button>
+        <div style="display:flex;gap:10px;">
+          <button class="btn-ghost-light" onclick="closeUserRegModal()">Later</button>
+          <button id="user-reg-submit-btn" class="btn-primary" style="width:auto;background:#059669;" onclick="submitUserRegistration()">Submit Registration</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Campaign Modal -->
+  <div id="edit-campaign-overlay" style="display:none;" onclick="closeEditCampaignModal(event)">
+    <div class="modal">
+      <h3>✏️ Edit Campaign</h3>
+      <div class="field">
+        <label>Campaign Name</label>
+        <input type="text" id="edit-campaign-name" placeholder="e.g. 11.11 Mega Sales" />
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div>
+          <div class="field" style="margin-bottom:6px;">
+            <label>D-Day / Event Date <span style="font-weight:400;color:var(--text-muted);font-size:12px;">(optional)</span></label>
+            <input type="date" id="edit-campaign-dday" />
+          </div>
+          <div class="field">
+            <label style="font-size:11px;color:var(--text-muted);">Time</label>
+            <input type="time" id="edit-campaign-dday-time" style="font-size:13px;" />
+          </div>
+        </div>
+        <div>
+          <div class="field" style="margin-bottom:6px;">
+            <label>Checklist Deadline <span style="font-weight:400;color:var(--text-muted);font-size:12px;">(optional)</span></label>
+            <input type="date" id="edit-campaign-deadline" />
+          </div>
+          <div class="field">
+            <label style="font-size:11px;color:var(--text-muted);">Time</label>
+            <input type="time" id="edit-campaign-deadline-time" style="font-size:13px;" />
+          </div>
+        </div>
+      </div>
+      <div class="field">
+        <label>Checklist Template <span style="font-weight:400;color:var(--text-muted);font-size:12px;">(optional)</span></label>
+        <select id="edit-campaign-template-sel">
+          <option value="">None (use default checklist)</option>
+        </select>
+      </div>
+      <div class="field">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+          <label style="margin-bottom:0;">Assign Members</label>
+          <button type="button" onclick="selectAllChips('edit-member-assign-list')" style="font-size:11px;color:var(--blue);background:transparent;border:none;cursor:pointer;padding:0;font-weight:500;">Select All</button>
+        </div>
+        <div class="member-list" id="edit-member-assign-list"></div>
+      </div>
+      <div id="edit-campaign-error" class="error-msg" style="display:none;"></div>
+      <div class="modal-actions">
+        <button class="btn-ghost-light" onclick="closeEditCampaignModal()">Cancel</button>
+        <button class="btn-primary" style="width:auto;" onclick="saveEditCampaign()">💾 Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ═══════════ TASK CHECK MODAL (Admin — Send Kit/RSP Check) ═══════════ -->
+  <div id="taskcheck-overlay" style="display:none;" onclick="closeTaskCheckModal(event)">
+    <div class="modal" style="max-width:560px;">
+      <div class="modal-header">
+        <div>
+          <h3>📦 Send Task Check</h3>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Members will see this as an interactive checklist they can update their status on.</div>
+        </div>
+        <button class="btn-ghost-light" onclick="closeTaskCheckModal()">✕</button>
+      </div>
+
+      <div class="field">
+        <label>Title</label>
+        <input type="text" id="tc-title" placeholder="e.g. D-5 Kit & RSP Check" value="Kit & RSP Check" />
+      </div>
+
+      <div class="field">
+        <label>Campaign (optional)</label>
+        <select id="tc-campaign-sel">
+          <option value="">All campaigns</option>
+        </select>
+      </div>
+
+      <div class="field" id="tc-entries-field" style="display:none;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+          <label style="margin-bottom:0;">Target entries <span style="font-size:11px;font-weight:400;color:var(--text-muted);">(by brand/platform/region — leave all unselected to apply to every entry)</span></label>
+          <button type="button" onclick="tcToggleAllEntries()" style="font-size:11px;color:var(--blue);background:transparent;border:none;cursor:pointer;padding:0;font-weight:500;">Select All</button>
+        </div>
+        <div class="member-list" id="tc-entries-chips" style="max-height:120px;overflow-y:auto;"></div>
+      </div>
+
+      <div class="field">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+          <label style="margin-bottom:0;">Send to <span style="font-size:11px;font-weight:400;color:var(--text-muted);">(select one or more, or leave all unselected for everyone)</span></label>
+          <button type="button" onclick="tcToggleAllMembers()" id="tc-select-all-btn" style="font-size:11px;color:var(--blue);background:transparent;border:none;cursor:pointer;padding:0;font-weight:500;">Select All</button>
+        </div>
+        <div class="member-list" id="tc-member-chips" style="max-height:140px;overflow-y:auto;"></div>
+      </div>
+
+      <div class="field">
+        <label>Check items <span style="font-size:11px;font-weight:400;color:var(--text-muted);">(edit or add items below)</span></label>
+        <div id="tc-items-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;"></div>
+        <button onclick="addTaskCheckItem()" style="font-size:12px;color:var(--blue);background:transparent;border:1px dashed var(--border);border-radius:6px;padding:5px 12px;cursor:pointer;width:100%;">+ Add item</button>
+      </div>
+
+      <div id="tc-error" class="error-msg" style="display:none;"></div>
+      <div class="modal-actions">
+        <button class="btn-ghost-light" onclick="closeTaskCheckModal()">Cancel</button>
+        <button class="btn-primary" style="width:auto;background:#0F766E;" onclick="sendTaskCheck()">📦 Send Task Check</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ TASK CHECK TRACKER (Admin — View Responses) ═══════════ -->
+  <div id="taskcheck-tracker-overlay" style="display:none;" onclick="closeTaskCheckTracker(event)">
+    <div class="modal" style="max-width:640px;max-height:80vh;overflow-y:auto;">
+      <div class="modal-header">
+        <h3 id="tc-tracker-title">Task Check Responses</h3>
+        <button class="btn-ghost-light" onclick="closeTaskCheckTracker()">✕</button>
+      </div>
+      <div id="tc-tracker-content"></div>
+    </div>
+  </div>
+
+  <!-- ═══════════ MEMBER TASK CHECK RESPONSE CARD ═══════════ -->
+  <div id="member-taskcheck-overlay" style="display:none;" onclick="closeMemberTaskCheck(event)">
+    <div class="modal" style="max-width:500px;">
+      <div class="modal-header">
+        <div>
+          <h3 id="mtc-title">Task Check</h3>
+          <div id="mtc-subtitle" style="font-size:12px;color:var(--text-muted);margin-top:2px;"></div>
+        </div>
+        <button class="btn-ghost-light" onclick="closeMemberTaskCheck()">✕</button>
+      </div>
+      <div id="mtc-items-list" style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px;"></div>
+      <div class="modal-actions">
+        <button class="btn-ghost-light" onclick="closeMemberTaskCheck()">Close</button>
+        <button class="btn-primary" style="width:auto;" onclick="saveMemberTaskCheck()">💾 Save Status</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ TEAM LEAD SCREEN ═══════════ -->
+  <div id="teamlead-screen" class="screen app-layout" style="display:none;">
+
+    <!-- ── TEAM LEAD SIDEBAR ── -->
+    <aside class="sidebar" id="teamlead-sidebar">
+      <div class="sidebar-header">
+        <span class="logo-mark sm">TR</span>
+        <div class="sidebar-brand">
+          <div class="sidebar-title">Trackory</div>
+          <div class="sidebar-sub">Team Lead</div>
+        </div>
+        <button class="sidebar-toggle" onclick="toggleTlSidebar()" title="Collapse sidebar">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 12L6 8l4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+
+      <nav class="sidebar-nav">
+        <button class="nav-item active" id="tl-navbtn-dashboard" onclick="showTlTab('dashboard')" title="My Team">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><rect x="2" y="2" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.5"/><rect x="11" y="2" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.5"/><rect x="2" y="11" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.5"/><rect x="11" y="11" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.5"/></svg>
+          <span class="nav-label">My Team</span>
+        </button>
+        <button class="nav-item" id="tl-navbtn-calendar" onclick="showTlTab('calendar')" title="Calendar">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><rect x="2" y="4" width="16" height="14" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M6 2v4M14 2v4M2 9h16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <span class="nav-label">Calendar</span>
+        </button>
+        <button class="nav-item" id="tl-navbtn-checklist" onclick="showTlTab('checklist')" title="My Checklist">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><path d="M7 10l2 2 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><rect x="2" y="2" width="16" height="16" rx="2" stroke="currentColor" stroke-width="1.5"/></svg>
+          <span class="nav-label">My Checklist</span>
+        </button>
+        <button class="nav-item" id="tl-navbtn-broadcasts" onclick="openBroadcastFeed()" title="Messages" style="position:relative;">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><path d="M16 3L4 8v4l12 5V3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M4 10h-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <span class="nav-label">Messages</span>
+          <span class="nav-badge" id="tl-broadcast-badge" style="display:none;"></span>
+        </button>
+      </nav>
+
+      <!-- Team Lead's own checklist progress summary (shown when a campaign is selected) -->
+      <div id="tl-sidebar-progress" style="display:none;">
+        <div class="sidebar-divider"></div>
+        <div style="padding:0 12px;">
+          <div class="sidebar-section-label">My checklist</div>
+          <div style="font-size:12px;color:var(--text-faint);margin-bottom:6px;" id="tl-sidebar-campaign-label"></div>
+          <div class="progress-summary">
+            <span id="tl-progress-label" style="font-size:11px;">0 / 0</span>
+            <span id="tl-progress-pct" style="font-size:11px;font-family:var(--mono);">0%</span>
+          </div>
+          <div class="progress-track"><div class="progress-fill" id="tl-progress-fill"></div></div>
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        <button class="nav-item" onclick="openChangePasswordModal()" title="Change Password">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><rect x="5" y="9" width="10" height="8" rx="1.5" stroke="currentColor" stroke-width="1.5"/><path d="M7 9V6a3 3 0 016 0v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <span class="nav-label">Change Password</span>
+        </button>
+        <div class="sidebar-signout-row">
+          <button class="nav-item nav-item-signout" onclick="handleLogout()" title="Sign out">
+            <svg class="nav-icon" viewBox="0 0 20 20" fill="none"><path d="M13 15l4-4-4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M17 11H7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M7 4H4a1 1 0 00-1 1v10a1 1 0 001 1h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            <span class="nav-label">Sign out</span>
+          </button>
+          <span class="sidebar-username" id="tl-name-display">Loading…</span>
+        </div>
+      </div>
+    </aside>
+
+    <main class="app-main" id="tl-main">
+      <!-- My Team (dashboard / overview) view -->
+      <div id="tl-dashboard-view" style="display:block;">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">My Team</h1>
+            <p class="page-sub" id="tl-dashboard-campaign-label">Checklist progress for your assigned members</p>
+          </div>
+          <button class="btn-outline-dark" onclick="loadTeamLeadView()">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M12 7A5 5 0 112 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M12 7l-2-2M12 7l2-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Refresh
+          </button>
+        </div>
+        <div style="margin-bottom:18px;">
+          <select id="tl-campaign-filter" onchange="renderTeamLeadView()" style="max-width:260px;padding:7px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--navy);">
+            <option value="">All campaigns</option>
+          </select>
+        </div>
+
+        <div id="tl-stats"></div>
+
+        <!-- Status filter for team progress -->
+        <div id="tl-status-filter-row" style="margin-bottom:8px;margin-top:4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <span style="font-size:12px;color:var(--text-muted);font-weight:500;">Filter by status:</span>
+          <button class="status-filter-btn active" data-status="all" onclick="filterTlByStatus(this,'all')">All</button>
+          <button class="status-filter-btn pending" data-status="pending" onclick="filterTlByStatus(this,'pending')">— Pending</button>
+          <button class="status-filter-btn in-progress" data-status="in-progress" onclick="filterTlByStatus(this,'in-progress')">⟳ In Progress</button>
+          <button class="status-filter-btn completed" data-status="completed" onclick="filterTlByStatus(this,'completed')">✓ Completed</button>
+        </div>
+
+        <!-- Team Progress Table -->
+        <div class="section-label" style="margin-bottom:10px;margin-top:4px;">
+          Team progress
+          <span style="float:right;display:flex;gap:8px;align-items:center;">
+            <input type="text" id="tl-table-search" placeholder="Search member…" oninput="filterTlProgressTable()" style="font-size:12px;padding:4px 10px;border:1px solid var(--border);border-radius:6px;width:160px;background:var(--surface);color:var(--text);" />
+            <select id="tl-table-sort" onchange="renderTeamLeadView()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);">
+              <option value="name">Sort: Name</option>
+              <option value="overall_desc">Sort: % (High→Low)</option>
+              <option value="overall_asc">Sort: % (Low→High)</option>
+              <option value="lastactive">Sort: Last active</option>
+            </select>
+          </span>
+        </div>
+        <div id="tl-table-wrap">
+          <table class="progress-table" id="tl-progress-table">
+            <thead>
+              <tr>
+                <th>Member</th>
+                <th>Campaign</th>
+                <th>D-5 Check</th>
+                <th>D-1 Check</th>
+                <th>Overall</th>
+                <th>Last active</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="tl-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Calendar view -->
+      <div id="tl-calendar-view" style="display:none;"></div>
+
+      <!-- My Checklist view (team lead's own checklist) -->
+      <div id="tl-checklist-view" style="display:none;">
+        <div class="page-header">
+          <div>
+            <h1 class="page-title" id="tl-campaign-name">My Checklist</h1>
+            <p class="page-sub" id="tl-campaign-sub">Select a campaign to begin</p>
+          </div>
+          <div class="page-header-actions">
+            <select id="tl-campaign-select" onchange="loadTlChecklist()" style="max-width:280px;">
+              <option value="">Select campaign…</option>
+            </select>
+          </div>
+        </div>
+        <div id="tl-progress-banner" style="display:none;margin-bottom:16px;"></div>
+        <div id="tl-rspkit-banner" style="display:none;margin-bottom:16px;"></div>
+        <div id="tl-no-campaign" class="empty-state">
+          <div class="empty-icon">📋</div>
+          <p>Select a campaign above to start your checklist.</p>
+        </div>
+        <div id="tl-checklist" style="display:none;"></div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Add Team Lead Modal -->
+  <div id="teamlead-modal-overlay" style="display:none;" onclick="closeTeamLeadModal(event)">
+    <div class="modal" style="max-width:480px;">
+      <h3>👥 Add Team Lead</h3>
+      <div class="field">
+        <label>Username</label>
+        <input type="text" id="new-tl-username" placeholder="e.g. lead_anna" />
+      </div>
+      <div class="field">
+        <label>Display Name</label>
+        <input type="text" id="new-tl-name" placeholder="e.g. Anna Cruz" />
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input type="password" id="new-tl-password" placeholder="Set a password" />
+      </div>
+      <div class="field">
+        <label>Assign Members to Manage</label>
+        <input type="text" id="tl-member-search" placeholder="Search members…"
+          oninput="filterTlMemberList(this.value)"
+          style="width:100%;box-sizing:border-box;font-size:12px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;background:var(--surface);color:var(--text);" />
+        <div id="tl-member-assign-list" style="display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--surface2);"></div>
+      </div>
+      <div id="teamlead-modal-error" class="error-msg" style="display:none;"></div>
+      <div class="modal-actions">
+        <button class="btn-ghost-light" onclick="closeTeamLeadModal()">Cancel</button>
+        <button class="btn-primary" style="width:auto;" onclick="addTeamLead()">Add Team Lead</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ EDIT TEAM LEAD MODAL ═══════════ -->
+  <div id="edit-tl-modal-overlay" style="display:none;" onclick="closeEditTlModal(event)">
+    <div class="modal" style="max-width:520px;">
+      <div class="modal-header">
+        <h3>✏️ Edit Team Lead</h3>
+        <button class="btn-ghost-light" onclick="closeEditTlModal()">✕</button>
+      </div>
+      <div id="edit-tl-info" style="font-size:13px;color:var(--text-muted);margin-bottom:14px;padding:10px 12px;background:var(--surface2);border-radius:8px;"></div>
+      <div class="field">
+        <label>Assigned Members <span style="font-size:11px;font-weight:400;color:var(--text-muted);">— check/uncheck to update</span></label>
+        <input type="text" id="edit-tl-member-search" placeholder="Search members…"
+          oninput="filterEditTlMemberList(this.value)"
+          style="width:100%;box-sizing:border-box;font-size:12px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;background:var(--surface);color:var(--text);" />
+        <div id="edit-tl-member-assign-list" style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--surface2);"></div>
+      </div>
+      <div id="edit-tl-modal-error" class="error-msg" style="display:none;"></div>
+      <div class="modal-actions">
+        <button class="btn-ghost-light" onclick="closeEditTlModal()">Cancel</button>
+        <button class="btn-primary" style="width:auto;" onclick="saveEditTlMembers()">💾 Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ ADD MANAGER MODAL ═══════════ -->
+  <div id="manager-modal-overlay" style="display:none;" onclick="closeManagerModal(event)">
+    <div class="modal" style="max-width:480px;">
+      <h3>🧭 Add Manager</h3>
+      <div class="field">
+        <label>Username</label>
+        <input type="text" id="new-mgr-username" placeholder="e.g. mgr_diana" />
+      </div>
+      <div class="field">
+        <label>Display Name</label>
+        <input type="text" id="new-mgr-name" placeholder="e.g. Diana Reyes" />
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input type="password" id="new-mgr-password" placeholder="Set a password" />
+      </div>
+      <div class="field">
+        <label>Assign Team Leads to Manage</label>
+        <input type="text" id="mgr-tl-search" placeholder="Search team leads…"
+          oninput="filterMgrTlList(this.value)"
+          style="width:100%;box-sizing:border-box;font-size:12px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;background:var(--surface);color:var(--text);" />
+        <div id="mgr-tl-assign-list" style="display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--surface2);"></div>
+      </div>
+      <div id="manager-modal-error" class="error-msg" style="display:none;"></div>
+      <div class="modal-actions">
+        <button class="btn-ghost-light" onclick="closeManagerModal()">Cancel</button>
+        <button class="btn-primary" style="width:auto;" onclick="addManager()">Add Manager</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ EDIT MANAGER MODAL ═══════════ -->
+  <div id="edit-mgr-modal-overlay" style="display:none;" onclick="closeEditMgrModal(event)">
+    <div class="modal" style="max-width:520px;">
+      <div class="modal-header">
+        <h3>✏️ Edit Manager</h3>
+        <button class="btn-ghost-light" onclick="closeEditMgrModal()">✕</button>
+      </div>
+      <div id="edit-mgr-info" style="font-size:13px;color:var(--text-muted);margin-bottom:14px;padding:10px 12px;background:var(--surface2);border-radius:8px;"></div>
+      <div class="field">
+        <label>Assigned Team Leads <span style="font-size:11px;font-weight:400;color:var(--text-muted);">— check/uncheck to update</span></label>
+        <input type="text" id="edit-mgr-tl-search" placeholder="Search team leads…"
+          oninput="filterEditMgrTlList(this.value)"
+          style="width:100%;box-sizing:border-box;font-size:12px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;background:var(--surface);color:var(--text);" />
+        <div id="edit-mgr-tl-assign-list" style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--surface2);"></div>
+      </div>
+      <div id="edit-mgr-modal-error" class="error-msg" style="display:none;"></div>
+      <div class="modal-actions">
+        <button class="btn-ghost-light" onclick="closeEditMgrModal()">Cancel</button>
+        <button class="btn-primary" style="width:auto;" onclick="saveEditMgrTeamLeads()">💾 Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ CHANGE PASSWORD MODAL (Member / Team Lead) ═══════════ -->
+  <div id="change-password-overlay" style="display:none;" onclick="closeChangePasswordModal(event)">
+    <div class="modal" style="max-width:400px;">
+      <div class="modal-header">
+        <h3>🔒 Change Password</h3>
+        <button class="btn-ghost-light" onclick="closeChangePasswordModal()">✕</button>
+      </div>
+      <div class="field">
+        <label>Current Password</label>
+        <input type="password" id="cp-current" placeholder="Your current password" />
+      </div>
+      <div class="field">
+        <label>New Password</label>
+        <input type="password" id="cp-new" placeholder="New password" />
+      </div>
+      <div class="field">
+        <label>Confirm New Password</label>
+        <input type="password" id="cp-confirm" placeholder="Re-enter new password" />
+      </div>
+      <div id="cp-error" class="error-msg" style="display:none;"></div>
+      <div class="modal-actions">
+        <button class="btn-ghost-light" onclick="closeChangePasswordModal()">Cancel</button>
+        <button class="btn-primary" style="width:auto;" onclick="changePassword()">Update Password</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ ADMIN RESET PASSWORD MODAL ═══════════ -->
+  <div id="reset-password-overlay" style="display:none;" onclick="closeResetPasswordModal(event)">
+    <div class="modal" style="max-width:400px;">
+      <div class="modal-header">
+        <h3>🔑 Reset Member Password</h3>
+        <button class="btn-ghost-light" onclick="closeResetPasswordModal()">✕</button>
+      </div>
+      <div id="rp-member-info" style="font-size:13px;color:var(--text-muted);margin-bottom:16px;padding:10px;background:var(--surface2);border-radius:8px;"></div>
+      <div class="field">
+        <label>New Password</label>
+        <input type="password" id="rp-new" placeholder="Set a new password" />
+      </div>
+      <div class="field">
+        <label>Confirm New Password</label>
+        <input type="password" id="rp-confirm" placeholder="Re-enter new password" />
+      </div>
+      <div id="rp-error" class="error-msg" style="display:none;"></div>
+      <div class="modal-actions">
+        <button class="btn-ghost-light" onclick="closeResetPasswordModal()">Cancel</button>
+        <button class="btn-primary" style="width:auto;background:#7C3AED;" onclick="confirmResetPassword()">Reset Password</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script src="checklist-data.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="app.js?v=2"></script>
 </body>
 </html>
