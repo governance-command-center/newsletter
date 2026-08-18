@@ -860,9 +860,11 @@ function fmtDate(iso){
 
 function fmtStamp(ms){
   if (!ms) return '—';
-  var d = new Date(ms);
-  if (isNaN(d.getTime())) return '—';
-  return d.toLocaleString('en-GB', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+  try {
+    var d = new Date(ms);
+    if (isNaN(d.getTime())) return '—';
+    return d.toLocaleString('en-GB', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+  } catch(e){ return '—'; }
 }
 
 function downloadBlob(filename, blob){
@@ -4799,12 +4801,6 @@ function bootApp(){
 /* ============================================================
    AUTHORSHIP DISPLAY
    ============================================================ */
-function fmtStamp(ts){
-  if (!ts) return '';
-  try {
-    return new Date(ts).toLocaleString('en-GB', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
-  } catch(e){ return ''; }
-}
 function authorLine(s){
   var bits = [];
   if (s.createdBy) bits.push('Added by <strong>'+esc(s.createdBy)+'</strong>' + (s.createdAt ? ' · '+esc(fmtStamp(s.createdAt)) : ''));
@@ -5110,7 +5106,12 @@ function renderMembersPane(wrap){
 
   function refresh(){
     AUTH.pull().then(function(){ draw(AUTH.listUsers()); })
-      .catch(function(){ wrap.innerHTML = '<div class="panel"><p class="panel__hint">Could not load the user list — network error.</p></div>'; });
+      .catch(function(e){
+        wrap.innerHTML = '<div class="panel"><p class="panel__hint">Could not load the user list ('+esc(e && e.message ? e.message : 'network error')+'). '
+          + '<button type="button" class="btn btn--ghost" id="membersRetryBtn">Retry</button></p></div>';
+        var rb = wrap.querySelector('#membersRetryBtn');
+        if (rb) rb.addEventListener('click', refresh);
+      });
   }
 
   wrap.innerHTML = '<div class="panel"><p class="panel__hint">Loading users…</p></div>';
