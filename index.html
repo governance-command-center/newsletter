@@ -25,48 +25,23 @@
       </div>
     </div>
 
-    <nav class="nav" id="adminNav" aria-label="Admin">
-      <div class="nav__label">Manage</div>
-      <button type="button" class="nav__item" data-nav="add">
-        <span class="nav__ico" aria-hidden="true">&#10133;</span>
-        <span class="nav__text">Add Update</span>
-      </button>
-      <!-- Import slides temporarily hidden from the UI. To restore, uncomment this block.
-      <button type="button" class="nav__item" data-nav="import">
-        <span class="nav__ico" aria-hidden="true">&#128229;</span>
-        <span class="nav__text">Import slides</span>
-      </button>
-      -->
-      <button type="button" class="nav__item" data-nav="export">
-        <span class="nav__ico" aria-hidden="true">&#128228;</span>
-        <span class="nav__text">Export &amp; PDF</span>
-      </button>
-      <button type="button" class="nav__item" data-nav="email">
-        <span class="nav__ico" aria-hidden="true">&#9993;&#65039;</span>
-        <span class="nav__text">Newsletter Email</span>
-      </button>
-      <button type="button" class="nav__item" data-nav="archive">
-        <span class="nav__ico" aria-hidden="true">&#128230;</span>
-        <span class="nav__text">Archive</span>
-      </button>
-      <button type="button" class="nav__item" data-nav="members">
-        <span class="nav__ico" aria-hidden="true">&#128101;</span>
-        <span class="nav__text">Members</span>
-      </button>
+    <nav class="nav nav--workspace" aria-label="Workspace">
+      <div class="nav__label">Workspace</div>
+      <button type="button" class="nav__item" data-nav="overview"><span class="nav__ico" aria-hidden="true">◫</span><span class="nav__text">Overview</span></button>
+      <button type="button" class="nav__item is-active" data-nav="browse"><span class="nav__ico" aria-hidden="true">▤</span><span class="nav__text">Updates Library</span></button>
+      <button type="button" class="nav__item" data-nav="add"><span class="nav__ico" aria-hidden="true">＋</span><span class="nav__text">Add Update</span></button>
+      <button type="button" class="nav__item" data-nav="present"><span class="nav__ico" aria-hidden="true">▣</span><span class="nav__text">Presentation</span></button>
     </nav>
-
-    <nav class="nav" aria-label="Primary">
-      <div class="nav__label">Browse</div>
-      <button type="button" class="nav__item is-active" data-nav="browse">
-        <span class="nav__ico" aria-hidden="true">&#128218;</span>
-        <span class="nav__text">Updates Library</span>
-      </button>
-      <button type="button" class="nav__item" data-nav="present">
-        <span class="nav__ico" aria-hidden="true">&#127909;</span>
-        <span class="nav__text">Presentation</span>
-      </button>
+    <nav class="nav" aria-label="Publishing">
+      <div class="nav__label">Publishing</div>
+      <button type="button" class="nav__item" data-nav="email"><span class="nav__ico" aria-hidden="true">✉</span><span class="nav__text">Newsletter Email</span></button>
+      <button type="button" class="nav__item" data-nav="export"><span class="nav__ico" aria-hidden="true">⇩</span><span class="nav__text">Export &amp; PDF</span></button>
+      <button type="button" class="nav__item" data-nav="archive"><span class="nav__ico" aria-hidden="true">▧</span><span class="nav__text">Archive</span></button>
     </nav>
-
+    <nav class="nav" id="adminNav" aria-label="Administration">
+      <div class="nav__label">Administration</div>
+      <button type="button" class="nav__item" data-nav="members"><span class="nav__ico" aria-hidden="true">♙</span><span class="nav__text">Members</span></button>
+    </nav>
     <div class="sidebar__foot">
       Regional PIC updates are maintained in the shared repository.
     </div>
