@@ -492,6 +492,7 @@ var state = {
   entryDateFilter: '__all__', // Existing-entries list: input-date filter (for choosing what to archive)
   entryWeekFilter: [],        // Existing-entries: multi-week selection (empty = all weeks)
   archiveWeekFilter: [],      // Archive: multi-week selection (empty = all weeks)
+  selectedInputDates: [],
   emailDateFilter: '__all__', // Generate email: which input date to include ('__all__' = every date)
   exportDateFilter: '__all__', // Export slides: which input date to include ('__all__' = every date)
   archiveGranularity: 'month', // Archive filter granularity: 'month' | 'quarter' | 'year'
@@ -571,6 +572,8 @@ function inputDateOptionsHtml(list, selected){
   });
   return opts.join('');
 }
+function sharedDateSelection(list){var a=state.selectedInputDates||[];return a.length?list.filter(function(s){return a.indexOf(s.input_date||NO_INPUT_DATE_KEY)>=0;}):list.slice();}
+function sharedDatePicker(id,list,callback){var el=document.getElementById(id);if(!el)return;var groups=inputDateGroups(list),chosen=state.selectedInputDates||[];el.innerHTML='<div class="multi-date__head"><strong>Input dates</strong><span>'+sharedDateSelection(list).length+' / '+list.length+' updates</span></div><button type="button" class="multi-date__all">All dates</button><div class="multi-date__options">'+groups.map(function(g){return '<label><input type="checkbox" value="'+esc(g.key)+'"'+(chosen.indexOf(g.key)>=0?' checked':'')+'>'+esc(g.label)+' ('+g.count+')</label>';}).join('')+'</div><small>None selected = all dates</small>';el.querySelector('.multi-date__all').onclick=function(){state.selectedInputDates=[];sharedDatePicker(id,list,callback);if(callback)callback();};el.querySelectorAll('input').forEach(function(input){input.onchange=function(){var a=state.selectedInputDates.slice();if(input.checked){if(a.indexOf(input.value)<0)a.push(input.value);}else a=a.filter(function(v){return v!==input.value;});state.selectedInputDates=a;sharedDatePicker(id,list,callback);if(callback)callback();};});}
 function slidesByInputDate(list, key){
   if (!key || key === '__all__') return list.slice();
   return list.filter(function(s){
@@ -1973,7 +1976,7 @@ function currentExportScope(){
 function exportJson(listArg, labelArg){
   var scope = currentExportScope();
   var list = listArg || (scope === 'filtered' ? filteredSlides() : slides);
-  if (!listArg) list = slidesByInputDate(list, state.exportDateFilter);
+  if (!listArg) list = sharedDateSelection(list);
   if (!list.length){ setStatus('Nothing to export — the current selection has no slides.', false); return; }
   var stamp = new Date().toISOString().slice(0,10);
   var payload = {
@@ -1997,7 +2000,7 @@ function exportJson(listArg, labelArg){
 function exportEmailHtml(listArg, labelArg){
   var scope = currentExportScope();
   var list = listArg || (scope === 'filtered' ? filteredSlides() : slides);
-  if (!listArg) list = slidesByInputDate(list, state.exportDateFilter);
+  if (!listArg) list = sharedDateSelection(list);
   if (!list.length){ setStatus('Nothing to export — the current selection has no slides.', false); return; }
 
   var baseUrl = state.emailBaseUrl || '';
@@ -2053,7 +2056,7 @@ function buildPrintDoc(list, titleLabel){
 function exportPdf(listArg, labelArg){
   var scope = currentExportScope();
   var list = listArg || (scope === 'filtered' ? filteredSlides() : slides);
-  if (!listArg) list = slidesByInputDate(list, state.exportDateFilter);
+  if (!listArg) list = sharedDateSelection(list);
   if (!list.length){ setStatus('Nothing to export — the current selection has no slides.', false); return; }
 
   // Preferred path: build a real vector PDF with genuine, clickable link
@@ -3083,7 +3086,7 @@ async function generateExecEmail(){
   var scope = currentExecScope();
   var list = scope === 'all' ? slides : filteredSlides();
   // Narrow to a single publish date when one is chosen in the dropdown.
-  list = slidesByInputDate(list, state.emailDateFilter);
+  list = sharedDateSelection(list);
   if (!list.length){
     setStatus('Nothing to include — no slides in the selected scope and publish date.', false);
     return;
@@ -3928,11 +3931,7 @@ function presentDateLabel(s){
 
 function buildPresentOrder(){
   var list = filteredSlides().slice();
-  // Narrow to a single publish date when one is chosen in the present bar.
-  var df = state.present.dateFilter;
-  if (df && df !== '__all__'){
-    list = list.filter(function(s){ return presentDateKey(s) === df; });
-  }
+  list = sharedDateSelection(list);
   var regionRank = function(r){ var i = ALLOWED_REGIONS.indexOf(r); return i === -1 ? 999 : i; };
   var platRank = function(p){ var i = ALLOWED_PLATFORMS.indexOf(p); return i === -1 ? 999 : i; };
   list.sort(function(a,b){
@@ -3958,38 +3957,7 @@ function buildPresentOrder(){
 // undated ones) under its effective publish date so none get dropped when a
 // specific date is chosen. Keeps the current selection if it still exists,
 // otherwise falls back to "All dates".
-function populatePresentDates(){
-  var sel = document.getElementById('presentDateSelect');
-  if (!sel) return;
-  var all = filteredSlides();
-  var groups = {}; // key -> { label, sortDate, count }
-  all.forEach(function(s){
-    var key = presentDateKey(s);
-    if (!groups[key]) groups[key] = { label: presentDateLabel(s), sortDate: s.input_date || '', count: 0 };
-    groups[key].count++;
-  });
-  var keys = Object.keys(groups).sort(function(ka, kb){
-    var ga = groups[ka], gb = groups[kb];
-    // dated groups first (newest first), then undated/labelled groups by label
-    if (ga.sortDate !== gb.sortDate){
-      if (!ga.sortDate) return 1;
-      if (!gb.sortDate) return -1;
-      return gb.sortDate.localeCompare(ga.sortDate);
-    }
-    return ga.label.localeCompare(gb.label);
-  });
-  if (state.present.dateFilter !== '__all__' && !groups[state.present.dateFilter]){
-    state.present.dateFilter = '__all__';
-  }
-  var opts = '<option value="__all__">All dates ('+all.length+')</option>';
-  opts += keys.map(function(k){
-    var g = groups[k];
-    return '<option value="'+esc(k)+'"'+(state.present.dateFilter===k?' selected':'')+'>'+esc(g.label)+' ('+g.count+')</option>';
-  }).join('');
-  sel.innerHTML = opts;
-  sel.value = state.present.dateFilter;
-}
-
+function populatePresentDates(){sharedDatePicker('presentDatePicker',filteredSlides(),function(){state.present.list=buildPresentOrder();state.present.index=0;renderPresent();});}
 function openPresentation(){
   populatePresentDates();
   var list = buildPresentOrder();
@@ -4093,15 +4061,6 @@ function initPresentControls(){
   document.getElementById('presentNext').addEventListener('click', function(){ presentGo(1); });
   document.getElementById('presentClose').addEventListener('click', closePresentation);
 
-  var dateSel = document.getElementById('presentDateSelect');
-  if (dateSel){
-    dateSel.addEventListener('change', function(){
-      state.present.dateFilter = dateSel.value || '__all__';
-      state.present.list = buildPresentOrder();
-      state.present.index = 0;
-      renderPresent();
-    });
-  }
   document.addEventListener('keydown', function(e){
     var ov = document.getElementById('presentOverlay');
     if (!ov || ov.hidden) return;
@@ -4408,12 +4367,8 @@ function renderExportPane(wrap){
         + '<label><input type="radio" name="exportScope" value="filtered" checked> Current filtered view ('+filteredSlides().length+')</label>'
         + '<label><input type="radio" name="exportScope" value="all"> All slides ('+slides.length+')</label>'
       + '</div>'
-      + '<div class="datefilterbar">'
-        + '<label class="datefilterbar__label" for="exportDateFilter">Input date to include</label>'
-        + '<select id="exportDateFilter" class="datefilterbar__select"></select>'
-        + '<span class="datefilterbar__count" id="exportDateCount"></span>'
-      + '</div>'
-      + '<div class="adminpanel__row">'
+      + '<div id="exportDatePicker" class="multi-date"></div>'
+     + '<div class="adminpanel__row">'
         + '<button type="button" class="btn" id="exportEmailBtn">Export as Email (HTML)</button>'
         + '<button type="button" class="btn btn--ghost" id="exportPdfBtn">Export as PDF</button>'
         + '<button type="button" class="btn btn--ghost" id="exportJsonBtn">Export as JSON (for re-import)</button>'
@@ -4464,27 +4419,8 @@ function renderExportPane(wrap){
 
   // Publish-date filter for exports — populated from the chosen scope and kept
   // in sync when the scope radios change, mirroring the Generate email pane.
-  var expDateSel = document.getElementById('exportDateFilter');
-  var expDateCount = document.getElementById('exportDateCount');
-  function exportScopeList(){ return currentExportScope() === 'all' ? slides : filteredSlides(); }
-  function refreshExportDates(){
-    var list = exportScopeList();
-    if (state.exportDateFilter !== '__all__' && !list.some(function(s){
-          var k = s.input_date ? s.input_date : NO_INPUT_DATE_KEY; return k === state.exportDateFilter; })){
-      state.exportDateFilter = '__all__';
-    }
-    expDateSel.innerHTML = inputDateOptionsHtml(list, state.exportDateFilter);
-    var n = slidesByInputDate(list, state.exportDateFilter).length;
-    if (expDateCount) expDateCount.textContent = n + ' update' + (n === 1 ? '' : 's') + ' will be exported';
-  }
-  refreshExportDates();
-  expDateSel.addEventListener('change', function(){
-    state.exportDateFilter = expDateSel.value || '__all__';
-    refreshExportDates();
-  });
-  wrap.querySelectorAll('input[name="exportScope"]').forEach(function(r){
-    r.addEventListener('change', refreshExportDates);
-  });
+  function refreshExportDates(){sharedDatePicker('exportDatePicker',currentExportScope()==='all'?slides:filteredSlides());}
+  refreshExportDates();wrap.querySelectorAll('input[name="exportScope"]').forEach(function(r){r.addEventListener('change',refreshExportDates);});
 
   function refreshCount(){
     var el = document.getElementById('delCount');
@@ -4576,12 +4512,8 @@ function renderEmailPane(wrap){
         + '<label><input type="radio" name="execScope" value="filtered" checked> Current filtered view ('+filteredSlides().length+')</label>'
         + '<label><input type="radio" name="execScope" value="all"> All slides ('+slides.length+')</label>'
       + '</div>'
-      + '<div class="datefilterbar">'
-        + '<label class="datefilterbar__label" for="emailDateFilter">Input date to include</label>'
-        + '<select id="emailDateFilter" class="datefilterbar__select"></select>'
-        + '<span class="datefilterbar__count" id="emailDateCount"></span>'
-      + '</div>'
-      + '<div class="fieldrow">'
+      + '<div id="emailDatePicker" class="multi-date"></div>'
+     + '<div class="fieldrow">'
         + '<label style="flex:1;min-width:240px;">Base URL (optional — makes thumbnails & button clickable)<input type="text" id="emailBaseUrlExec" placeholder="https://yourteam.github.io/platform-updates/" value="'+esc(state.emailBaseUrl)+'"></label>'
       + '</div>'
       + '<div class="adminpanel__row">'
@@ -4592,29 +4524,8 @@ function renderEmailPane(wrap){
 
   // Populate the publish-date dropdown from whatever scope is currently chosen,
   // and keep it in sync when the scope radios change.
-  var dateSel = document.getElementById('emailDateFilter');
-  var dateCount = document.getElementById('emailDateCount');
-  function scopeList(){ return currentExecScope() === 'all' ? slides : filteredSlides(); }
-  function refreshEmailDates(){
-    var list = scopeList();
-    // Drop a stale date selection that isn't in the current scope.
-    if (state.emailDateFilter !== '__all__' && !list.some(function(s){
-          var k = s.input_date ? s.input_date : NO_INPUT_DATE_KEY; return k === state.emailDateFilter; })){
-      state.emailDateFilter = '__all__';
-    }
-    dateSel.innerHTML = inputDateOptionsHtml(list, state.emailDateFilter);
-    var n = slidesByInputDate(list, state.emailDateFilter).length;
-    if (dateCount) dateCount.textContent = n + ' update' + (n === 1 ? '' : 's') + ' will be included';
-  }
-  refreshEmailDates();
-  dateSel.addEventListener('change', function(){
-    state.emailDateFilter = dateSel.value || '__all__';
-    refreshEmailDates();
-  });
-  wrap.querySelectorAll('input[name="execScope"]').forEach(function(r){
-    r.addEventListener('change', refreshEmailDates);
-  });
-
+  function refreshEmailDates(){sharedDatePicker('emailDatePicker',currentExecScope()==='all'?slides:filteredSlides());}
+  refreshEmailDates();wrap.querySelectorAll('input[name="execScope"]').forEach(function(r){r.addEventListener('change',refreshEmailDates);});
   document.getElementById('emailBaseUrlExec').addEventListener('input', function(e){ state.emailBaseUrl = e.target.value; });
   document.getElementById('execGenerateBtn').addEventListener('click', generateExecEmail);
   if (state.execHtml) renderExecPreview();
