@@ -725,13 +725,14 @@ var BROWSE_VIEWS = { browse: true };
 function isBrowseNav(nav){ return !!BROWSE_VIEWS[nav]; }
 
 var NAV_META = {
-  browse:   { title: 'Browse updates', sub: 'Every update in one place — group by platform or region, filter, and search.' },
+  overview: { title: 'Overview', sub: 'A clear view of merchandising updates across regions and platforms.' },
+  browse:   { title: 'Updates Library', sub: 'Every update in one place — group by platform or region, filter, and search.' },
   present:  { title: 'Present', sub: 'Full-screen walkthrough, grouped by date, then region, then platform.' },
-  add:      { title: 'Add entry', sub: 'Add a new update directly, or edit an existing one.' },
+  add:      { title: 'Add Update', sub: 'Add a new update directly, or edit an existing one.' },
   import:   { title: 'Import slides', sub: 'Bring in a PowerPoint deck or a JSON backup.' },
-  export:   { title: 'Export slides', sub: 'Download the current view as PDF or JSON.' },
+  export:   { title: 'Export & PDF', sub: 'Download the current view as PDF or JSON.' },
   archive:  { title: 'Archive', sub: 'Set aside past entries to keep the current set clean. Restore or export any batch later.' },
-  email:    { title: 'Generate email', sub: 'A leadership briefing you can preview and paste straight into your inbox.' },
+  email:    { title: 'Newsletter Email', sub: 'A leadership briefing you can preview and paste straight into your inbox.' },
   members:  { title: 'Members', sub: 'Create users and passwords, reset them, and manage who can access this tool.' }
 };
 
@@ -3105,10 +3106,28 @@ async function generateExecEmail(){
 /* ============================================================
    ADMIN PANES (rendered into #workspaceBody, one per nav item)
    ============================================================ */
+function renderOverviewPane(wrap){
+  var now=new Date(),weekStart=new Date(now);weekStart.setDate(now.getDate()-((now.getDay()+6)%7));weekStart.setHours(0,0,0,0);
+  var recent=slides.slice().sort(function(a,b){return String(b.created_at||b.updated_at||b.input_date||b.date||'').localeCompare(String(a.created_at||a.updated_at||a.input_date||a.date||''));});
+  var thisWeek=slides.filter(function(e){var d=new Date(e.created_at||e.input_date||e.date||0);return !isNaN(d.getTime())&&d>=weekStart;}).length;
+  var platforms=new Set(slides.map(function(e){return e.platform;}).filter(Boolean));
+  var regions=new Set();slides.forEach(function(e){entryRegions(e).forEach(function(r){regions.add(r);});});
+  wrap.innerHTML='<div class="overview">'
+    +'<div class="overview__hero"><div><div class="overview__eyebrow">MERCHANDISING INTELLIGENCE</div><h2>One workspace. Every marketplace update.</h2><p>Keep regional knowledge sharing, weekly presentations, and newsletter preparation connected.</p></div><div class="overview__hero-actions"><button class="btn" data-go="add">+ Add update</button><button class="btn btn--ghost" data-go="browse">Explore library</button></div></div>'
+    +'<div class="overview__metrics">'
+    +[['Total updates',slides.length,'▤'],['This week',thisWeek,'◷'],['Regions covered',regions.size,'◎'],['Platforms',platforms.size,'◈']].map(function(m){return '<div class="overview__metric"><span>'+m[0]+'</span><strong>'+m[1]+'</strong><small>'+m[2]+'</small></div>';}).join('')
+    +'</div>'
+    +'<div class="overview__columns"><section class="overview__section"><div class="overview__section-head"><h3>Recent updates</h3><button data-go="browse">View all →</button></div>'
+    +(recent.length?recent.slice(0,6).map(function(e){return '<div class="overview__entry"><div class="overview__entry-meta">'+esc(e.platform||'Update')+' · '+esc(entryRegions(e).join(', ')||'Regional')+'</div><strong>'+esc(e.title||'Untitled update')+'</strong><small>'+esc(e.input_date||e.date||'')+'</small></div>';}).join(''):'<p>No updates have been submitted yet.</p>')
+    +'</section><section class="overview__section overview__quick"><h3>Quick actions</h3><p>Pick up where your team left off.</p><button data-go="present"><span>▣</span><span><strong>Start presentation</strong><small>Walk through regional updates</small></span>→</button><button data-go="email"><span>✉</span><span><strong>Generate newsletter</strong><small>Prepare an Outlook-ready email</small></span>→</button><button data-go="export"><span>⇩</span><span><strong>Export report</strong><small>Download PDF and backups</small></span>→</button></section></div></div>';
+  wrap.querySelectorAll('[data-go]').forEach(function(el){el.addEventListener('click',function(){setNav(el.getAttribute('data-go'));});});
+}
+
 function renderWorkspace(){
   var wrap = document.getElementById('workspaceBody');
   if (!wrap) return;
-  if (state.nav === 'add')         renderAddPane(wrap);
+  if (state.nav === 'overview')    renderOverviewPane(wrap);
+  else if (state.nav === 'add')         renderAddPane(wrap);
   else if (state.nav === 'import') renderImportPane(wrap);
   else if (state.nav === 'export') renderExportPane(wrap);
   else if (state.nav === 'archive') renderArchivePane(wrap);
