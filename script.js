@@ -1092,7 +1092,7 @@ function renderBody(body, forPrint){
       html += '<ul><li>'+esc(b.text)+'</li></ul>';
     } else if (b.type === 'image'){
       if (b.dataUrl){
-        html += '<img class="'+(forPrint?'':'card__img')+'" src="'+b.dataUrl+'" alt="'+esc(b.file||'slide image')+'">';
+        html += '<img class="'+(forPrint?'':'card__img')+'" src="'+esc(b.dataUrl)+'" alt="'+esc(b.file||'slide image')+'" loading="lazy">';
       } else {
         html += '<div class="card__imgnote">🖼 '+esc(b.file || 'image')+' — no image data available for this slide (re-import it from the source .pptx to include the picture)</div>';
       }
@@ -4039,6 +4039,7 @@ function renderPresent(){
       + '<div class="present__content">'+renderBody(s.body, false)+'</div>'
     + '</div>';
   stage.scrollTop = 0;
+  stage.querySelectorAll('img').forEach(function(img){img.addEventListener('error',function(){if(img.dataset.failed)return;img.dataset.failed='1';var note=document.createElement('div');note.className='present__image-error';note.textContent='Image unavailable: '+(img.alt||'attachment')+'. The stored image link may be missing or inaccessible; ask the PIC to re-upload the original file.';img.replaceWith(note);});});
 
   // progress dots — mark where a new date begins
   progress.innerHTML = list.map(function(item, idx){
