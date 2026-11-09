@@ -93,10 +93,11 @@ var AUTH = (function(){
       users:  (d.users && typeof d.users==='object') ? d.users : {},
       slides: Array.isArray(d.slides) ? d.slides : [],
       archives: Array.isArray(d.archives) ? d.archives : [],
+      drafts: Array.isArray(d.drafts) ? d.drafts : [],
       meta: (d.meta && typeof d.meta==='object') ? d.meta : {}
     };
   }
-  function blankRemote(){ return { users:{}, slides:[], archives:[], meta:{ createdAt:Date.now() } }; }
+  function blankRemote(){ return { users:{}, slides:[], archives:[], drafts:[], meta:{ createdAt:Date.now() } }; }
 
   /* ---- image upload to Supabase Storage (public bucket) ---- */
   function getImgbbKey(){ return isConfigured() ? 'supabase' : ''; } // truthy when configured, so the picker uploads
@@ -221,11 +222,12 @@ var AUTH = (function(){
   }
 
   /* ---- shared data ---- */
-  function pullData(){ return pull().then(function(r){ return { slides:r.slides, archives:r.archives }; }); }
-  function pushData(slidesArr, archivesArr){
+  function pullData(){ return pull().then(function(r){ return { slides:r.slides, archives:r.archives, drafts:r.drafts }; }); }
+  function pushData(slidesArr, archivesArr, draftsArr){
     return pull().then(function(r){
       r.slides = Array.isArray(slidesArr)?slidesArr:r.slides;
       if (Array.isArray(archivesArr)) r.archives = archivesArr;
+      if (Array.isArray(draftsArr)) r.drafts = draftsArr;
       return push(r);
     });
   }
@@ -392,6 +394,7 @@ function clearSavedSlides(){
    ------------------------------------------------------------------ */
 var IDB_ARCHIVE_KEY = 'archives.v1';
 var archives = [];   // loaded at startup
+var sharedDrafts = []; // unpublished entries; shared across authorized Hub users
 
 function saveArchives(){
   if (HAS_STORAGE){
@@ -3310,6 +3313,7 @@ function coverageDisplay(s){
 
 function blankDraft(){
   return {
+    draftId: null,
     id: null,               // null = new; otherwise editing an existing slide
     platform: ALLOWED_PLATFORMS[0] || 'Others',
     region: ALLOWED_REGIONS[0] || '',
@@ -3379,6 +3383,7 @@ function draftFromSlide(s){
   var _links = entryLinks(s);
   return {
     id: s.id,
+    draftId: s.draftId || null,
     platform: s.platform,
     region: _regs[0] || '',
     regions: _regs.slice(),                 // full multi-region set, editable as-is
@@ -3395,6 +3400,17 @@ function draftFromSlide(s){
 }
 
 function startNewEntry(){ state.editDraft = blankDraft(); setNav('add'); }
+function startDuplicateEntry(id){
+  var source=slides.find(function(s){return s.id===id;});if(!source)return;
+  var draft=draftFromSlide(source);
+  draft.id=null;draft.draftId=null;
+  draft.input_date=todayIso();
+  var current=coverageRangeForDay(todayIso());
+  if(current){draft.coverage_start=current.start;draft.coverage_end=current.end;}
+  draft.date='';draft.date_range='';
+  state.editDraft=draft;
+  setNav('add');setStatus('Duplicated entry into a new unsaved form. Review the coverage, title, regions and links before publishing.',true);
+}
 function startEditEntry(id){
   var s = slides.find(function(x){ return x.id === id; });
   if (!s) return;
@@ -3557,6 +3573,7 @@ function renderAddPane(wrap){
       + '<td style="white-space:nowrap;">'+esc(fmtStamp(s.createdAt))+'</td>'
       + '<td style="white-space:nowrap;">'
         + '<button type="button" class="entrytable__act" data-edit="'+esc(s.id)+'">Edit</button>'
+        + '<button type="button" class="entrytable__act" data-duplicate="'+esc(s.id)+'">Duplicate</button>'
         + '<button type="button" class="entrytable__act entrytable__act--del" data-del="'+esc(s.id)+'">Delete</button>'
       + '</td>'
     + '</tr>';
@@ -3647,12 +3664,18 @@ function renderAddPane(wrap){
 
       + '<div class="formactions">'
         + '<button type="button" class="btn" id="saveEntryBtn">'+(editing?'Save changes':'Add entry')+'</button>'
+        + '<button type="button" class="btn btn--ghost" id="saveDraftBtn">Save as draft</button>'
         + (editing ? '<button type="button" class="btn btn--ghost" id="cancelEditBtn">Cancel edit</button>' : '')
         + '<div class="formactions__spacer"></div>'
         + '<button type="button" class="btn btn--ghost" id="clearFormBtn">Clear form</button>'
       + '</div>'
     + '</div>'
 
+    + '<div class="panel">'
+      + '<div class="panel__head"><h2 class="panel__title">Shared drafts ('+sharedDrafts.length+')</h2></div>'
+      + '<p class="panel__hint">Unpublished work visible to authorized Hub users. Drafts are excluded from Updates Library, Presentation, Newsletter and PDF.</p>'
+      + (sharedDrafts.length ? '<div class="addphase__draftlist">'+sharedDrafts.slice().sort(function(a,b){return (b.updatedAt||0)-(a.updatedAt||0);}).map(function(item){return '<div class="addphase__draftrow"><div><strong>'+esc(item.title||'Untitled draft')+'</strong><small>'+esc(item.platform||'')+' · '+esc((item.regions||[]).join(', '))+' · '+esc(item.updatedBy||item.createdBy||'')+'</small></div><div><button type="button" class="entrytable__act" data-open-draft="'+esc(item.draftId)+'">Continue</button><button type="button" class="entrytable__act entrytable__act--del" data-delete-draft="'+esc(item.draftId)+'">Delete</button></div></div>';}).join('')+'</div>' : '<div class="detailblock__empty">No drafts yet.</div>')
+    + '</div>'
     + '<div class="panel">'
       + '<div class="panel__head"><h2 class="panel__title">Existing entries ('+slides.length+')</h2></div>'
       + '<p class="panel__hint">Edit or remove any entry. Entries are grouped by <strong>input date</strong>, then by region (PH-MY-SG-TH-VN). Filter by <strong>input date</strong> to isolate one batch, then tick entries and use <strong>Archive selected</strong> to set them aside — archived entries leave the browse, presentation and email/PDF views but can be restored anytime from the Archive tab. Saved to this browser.</p>'
@@ -3913,6 +3936,23 @@ function wireAddPane(wrap){
     });
   });
 
+  // Save draft without publishing to active slides.
+  var draftBtn=wrap.querySelector('#saveDraftBtn');
+  if(draftBtn)draftBtn.addEventListener('click',function(){saveSharedDraft(wrap);});
+  wrap.querySelectorAll('[data-open-draft]').forEach(function(btn){btn.addEventListener('click',function(){
+    var item=sharedDrafts.find(function(x){return x.draftId===btn.getAttribute('data-open-draft');});
+    if(!item)return;
+    state.editDraft=draftFromSlide(item);state.editDraft.id=null;renderAddPane(wrap);
+  });});
+  wrap.querySelectorAll('[data-delete-draft]').forEach(function(btn){btn.addEventListener('click',function(){
+    var id=btn.getAttribute('data-delete-draft');
+    if(!window.confirm('Delete this shared draft?'))return;
+    sharedDrafts=sharedDrafts.filter(function(x){return x.draftId!==id;});
+    if(state.editDraft&&state.editDraft.draftId===id)state.editDraft=blankDraft();
+    persistSharedDrafts('Draft deleted.').then(function(){renderAddPane(wrap);});
+  });});
+  wrap.querySelectorAll('[data-duplicate]').forEach(function(btn){btn.addEventListener('click',function(){startDuplicateEntry(btn.getAttribute('data-duplicate'));});});
+
   // save
   var saveBtn = document.getElementById('saveEntryBtn');
   if (saveBtn) saveBtn.addEventListener('click', function(){ saveEntry(wrap); });
@@ -4132,6 +4172,54 @@ function showAddUpdateErrors(errors){
   }
 }
 
+
+/* Drafts live in the shared Supabase store, outside published slides. */
+function persistSharedDrafts(message){
+  if(!AUTH.isConfigured())return Promise.reject(new Error('Shared storage is not configured.'));
+  setSyncStatus('Saving shared drafts…');
+  return AUTH.pull().then(function(remote){
+    remote.drafts=sharedDrafts.slice();
+    return AUTH.push(remote);
+  }).then(function(){
+    setSyncStatus('Shared drafts saved ✓',true);
+    if(message)setStatus(message,true);
+  }).catch(function(err){
+    setSyncStatus('Could not save drafts: '+(err.message||err),false);
+    setStatus('Draft was not saved to the shared store. Please retry.',false);
+    throw err;
+  });
+}
+function saveSharedDraft(wrap){
+  syncDraftFromForm();
+  var d=state.editDraft;if(!d)return;
+  if(d.body.some(function(b){return b.type==='image'&&b.uploading;})){
+    setStatus('Wait for image uploads to finish before saving a draft.',false);return;
+  }
+  var now=Date.now(),who=(AUTH.getSession()||{}).username||'unknown';
+  var id=d.draftId||('draft-'+now+'-'+Math.random().toString(36).slice(2,9));
+  var previous=sharedDrafts.find(function(x){return x.draftId===id;});
+  var item=JSON.parse(JSON.stringify(d));
+  item.draftId=id;item.id=null;item.updatedAt=now;item.updatedBy=who;
+  item.createdAt=previous?previous.createdAt:now;
+  item.createdBy=previous?previous.createdBy:who;
+  var next=sharedDrafts.filter(function(x){return x.draftId!==id;});next.push(item);
+  // Commit to the local list only after the shared write succeeds.
+  setSyncStatus('Saving shared drafts…');
+  AUTH.pull().then(function(remote){
+    var remoteDrafts=Array.isArray(remote.drafts)?remote.drafts:[];
+    remote.drafts=remoteDrafts.filter(function(x){return x.draftId!==id;}).concat([item]);
+    return AUTH.push(remote).then(function(){sharedDrafts=remote.drafts;});
+  }).then(function(){
+    state.editDraft.draftId=id;
+    setSyncStatus('Shared drafts saved ✓',true);
+    setStatus('Draft saved for the team. It is not published.',true);
+    renderAddPane(wrap);
+  }).catch(function(err){
+    setSyncStatus('Could not save draft: '+(err.message||err),false);
+    setStatus('Draft save failed. Your form is still here; please retry.',false);
+  });
+}
+
 function saveEntry(wrap){
   syncDraftFromForm();
   var d = state.editDraft;
@@ -4225,6 +4313,11 @@ function saveEntry(wrap){
 
   state.execHtml = null; state.digestHtml = null;
   saveSlides();
+  if(d.draftId){
+    var publishedDraftId=d.draftId;
+    sharedDrafts=sharedDrafts.filter(function(x){return x.draftId!==publishedDraftId;});
+    persistSharedDrafts('Draft published and removed from drafts.').catch(function(){});
+  }
   state.editDraft = blankDraft();     // reset for the next entry
   renderAddPane(wrap);
 }
@@ -5120,6 +5213,7 @@ function bootApp(){
     if (data){
       if (Array.isArray(data.slides)) slides = data.slides;
       if (Array.isArray(data.archives)) archives = data.archives;
+      if (Array.isArray(data.drafts)) sharedDrafts = data.drafts;
       slides.forEach(normalizeEntryRegions);
       (archives || []).forEach(function(b){ (b.slides||[]).forEach(normalizeEntryRegions); });
       restoredFrom = Date.now();
