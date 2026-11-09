@@ -2589,7 +2589,9 @@ function buildEmailHtml(list, opts){
    ============================================================ */
 
 function reportingPeriodLabel(list){
-  var dates = list.map(function(s){return (entryCoverage(s)||{}).start||s.date;}).filter(Boolean).sort();
+  var coverages=list.map(entryCoverage).filter(Boolean);
+  if(coverages.length){var starts=coverages.map(function(c){return c.start;}).sort(),ends=coverages.map(function(c){return c.end;}).sort();return coverageLabel(starts[0],ends[ends.length-1]);}
+  var dates = list.map(function(s){return s.date;}).filter(Boolean).sort();
   if (dates.length){
     var min = dates[0], max = dates[dates.length-1];
     return min === max ? fmtDate(min) : (fmtDate(min) + ' – ' + fmtDate(max));
@@ -3601,16 +3603,16 @@ function renderAddPane(wrap){
   wrap.innerHTML =
     '<div class="panel">'
       + '<div class="panel__head"><h2 class="panel__title">'+(editing?'Edit entry':'Add a new entry')+'</h2></div>'
-      + '<p class="panel__hint">Fill in the update below. A single entry can cover <strong>several regions</strong> — tick each one under Region(s), and give each region its own link. <strong>Details</strong> is a rich-text editor — type freely, then select text and use the toolbar for <strong>bold</strong>, italic, headers, bullet lists, font size, colour and links. You can also <strong>paste a table</strong> straight into a text block and it will fit the width automatically. Add image blocks for pictures (up to 2). Everything flows into the browse views, presentation, email summary and PDF export.</p>'
+      + '<p class="panel__hint">Choose the coverage batch for the weekly catch-up, then fill in the update below. A single entry can cover <strong>several regions</strong> — tick each one under Region(s), and give each region its own link. <strong>Details</strong> is a rich-text editor — type freely, then select text and use the toolbar for <strong>bold</strong>, italic, headers, bullet lists, font size, colour and links. You can also <strong>paste a table</strong> straight into a text block and it will fit the width automatically. Add image blocks for pictures (up to 2). Everything flows into the browse views, presentation, email summary and PDF export.</p>'
 
-      + '<div class="addphase__section"><h3>1. Basic information</h3><p>When and where was the announcement published?</p></div>'
+      + '<div class="addphase__section"><h3>1. Basic information</h3><p>Log when the team encoded this update and select the marketplace.</p></div>'
       + '<div class="formgrid">'
         + '<div class="formfield"><label>Input date</label><input type="date" id="fInputDate" value="'+esc(d.input_date||'')+'"><span class="formfield__hint">The date this update was logged. Drives grouping, filtering and the presentation.</span></div>'
         + '<div class="formfield"><label>Platform</label><select id="fPlatform">'+optionsHtml(ALLOWED_PLATFORMS, d.platform)+'</select></div>'
 
         + '<div class="formfield formfield--wide"><label>Title <span class="addphase__required">*</span></label><input type="text" id="fTitle" value="'+esc(d.title)+'" placeholder="Headline for this update"><small class="addphase__error" data-error-for="fTitle"></small></div>'
       + '</div>'
-      + '<div class="addphase__section"><h3>2. Coverage &amp; official sources</h3><p>Select all affected markets and paste the announcement link for each region, when available.</p></div>'
+      + '<div class="addphase__section"><h3>2. Coverage &amp; official sources</h3><p>Coverage is based on when the team obtained updates (Wednesday–Monday), not the marketplace publish date.</p></div>'
       + '<div class="formgrid">'
         + '<div class="formfield formfield--wide"><label>Coverage period *</label><select id="fCoverage">'+(function(){
             var options=coverageOptions(d),selected=d.coverage_start&&d.coverage_end?d.coverage_start+'|'+d.coverage_end:'';
@@ -3687,7 +3689,7 @@ function syncDraftFromForm(){
   d.platform = g('fPlatform') || d.platform;
   d.input_date = g('fInputDate');
   d.date = g('fDate');
-  d.date_range = g('fRange');
+  d.date_range = document.getElementById('fRange') ? g('fRange') : d.date_range;
   var cov=g('fCoverage');
   if(cov==='custom'){d.coverage_start=g('fCoverageStart');d.coverage_end=g('fCoverageEnd');}
   else if(cov&&cov.indexOf('|')!==-1){var parts=cov.split('|');d.coverage_start=parts[0];d.coverage_end=parts[1];}
@@ -4101,9 +4103,9 @@ function insertPasteAtCursor(editor,html){
 function validateAddUpdate(d){
   var errors=[];
   if(!d.title||!d.title.trim())errors.push({field:'fTitle',message:'Enter an announcement title.'});
-  if(!coverageDate(d.coverage_start)||!coverageDate(d.coverage_end)||d.coverage_start>d.coverage_end)errors.push({field:'fCoverage',message:'Choose a valid coverage start and end date.'});
-  if(!d.input_date||!/^\d{4}-\d{2}-\d{2}$/.test(d.input_date)||isNaN(Date.parse(d.input_date)))errors.push({field:'fInputDate',message:'Choose a valid input date.'});
-  if(d.date&&(!/^\d{4}-\d{2}-\d{2}$/.test(d.date)||isNaN(Date.parse(d.date))))errors.push({field:'fDate',message:'Choose a valid publish date, or leave it blank if unknown.'});
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(d.coverage_start||'')||!/^\d{4}-\d{2}-\d{2}$/.test(d.coverage_end||'')||!coverageDate(d.coverage_start)||!coverageDate(d.coverage_end)||d.coverage_start>d.coverage_end)errors.push({field:'fCoverage',message:'Choose a valid coverage start and end date.'});
+  if(!d.input_date||!/^\d{4}-\d{2}-\d{2}$/.test(d.input_date)||!coverageDate(d.input_date))errors.push({field:'fInputDate',message:'Choose a valid input date.'});
+  // Legacy publish date is retained in stored records, not edited or required.
   if(!Array.isArray(d.regions)||!d.regions.length)errors.push({field:'fRegions',message:'Select at least one region.'});
   var urls=(d.regions||[]).map(function(r){return d.links&&d.links[r]||'';}).filter(Boolean);
   if(!urls.length&&d.link)urls.push(d.link);
