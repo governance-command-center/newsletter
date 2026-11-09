@@ -2589,7 +2589,7 @@ function buildEmailHtml(list, opts){
    ============================================================ */
 
 function reportingPeriodLabel(list){
-  var dates = list.map(function(s){ return s.date; }).filter(Boolean).sort();
+  var dates = list.map(function(s){return (entryCoverage(s)||{}).start||s.date;}).filter(Boolean).sort();
   if (dates.length){
     var min = dates[0], max = dates[dates.length-1];
     return min === max ? fmtDate(min) : (fmtDate(min) + ' – ' + fmtDate(max));
@@ -2602,6 +2602,8 @@ function reportingPeriodLabel(list){
 // the headline period in the email intro. Falls back to the computed reporting
 // period when no label was set.
 function periodCoveredLabel(list){
+  var ranges=list.map(entryCoverage).filter(Boolean);
+  if(ranges.length){var starts=ranges.map(function(c){return c.start;}).sort(),ends=ranges.map(function(c){return c.end;}).sort();return coverageLabel(starts[0],ends[ends.length-1]);}
   var dr = list.map(function(s){ return s.date_range; }).filter(Boolean)[0];
   return dr || reportingPeriodLabel(list);
 }
@@ -3262,6 +3264,48 @@ function renderWorkspace(){
 
 // A fresh draft for the Add form, pre-seeded with one empty text block so the
 // editor is visible immediately.
+
+/* Wednesday–Monday reporting cycle; the period records when the team obtained updates. */
+function coverageIso(d){return d.toISOString().slice(0,10);}
+function coverageDate(s){var d=new Date(s+'T12:00:00Z');return isNaN(d.getTime())?null:d;}
+function coverageRangeForDay(iso){
+  var day=coverageDate(iso);if(!day)return null;
+  var dow=day.getUTCDay(),daysSinceWed=(dow+4)%7;
+  // On Tuesday the preceding Wednesday–Monday batch remains current.
+  if(dow===2)daysSinceWed=6;
+  var start=new Date(day);start.setUTCDate(day.getUTCDate()-daysSinceWed);
+  var end=new Date(start);end.setUTCDate(start.getUTCDate()+5);
+  return {start:coverageIso(start),end:coverageIso(end)};
+}
+function coverageLabel(start,end){return fmtDate(start)+' – '+fmtDate(end);}
+function coverageOptions(d){
+  var current=coverageRangeForDay(todayIso()),opts=[],seen={};
+  if(current){for(var i=0;i<8;i++){
+    var a=coverageDate(current.start),b=coverageDate(current.end);
+    a.setUTCDate(a.getUTCDate()-i*7);b.setUTCDate(b.getUTCDate()-i*7);
+    var x=coverageIso(a),y=coverageIso(b),key=x+'|'+y;
+    seen[key]=true;opts.push({key:key,label:coverageLabel(x,y)+(i===0?' (Current batch)':'')});
+  }}
+  if(d.coverage_start&&d.coverage_end){
+    var old=d.coverage_start+'|'+d.coverage_end;
+    if(!seen[old])opts.push({key:old,label:coverageLabel(d.coverage_start,d.coverage_end)+' (Saved batch)'});
+  }
+  return opts;
+}
+function entryCoverage(s){
+  if(s.coverage_start&&s.coverage_end)return {start:s.coverage_start,end:s.coverage_end};
+  // Legacy records: keep historic input-date group rather than inventing a coverage week.
+  return null;
+}
+function coverageKey(s){
+  var c=entryCoverage(s);
+  return c?'c:'+c.start+'|'+c.end:(s.input_date?'i:'+s.input_date:'__undated__');
+}
+function coverageDisplay(s){
+  var c=entryCoverage(s);
+  return c?coverageLabel(c.start,c.end):(s.input_date?'Legacy: '+fmtDate(s.input_date):'Legacy: no date');
+}
+
 function blankDraft(){
   return {
     id: null,               // null = new; otherwise editing an existing slide
@@ -3271,6 +3315,8 @@ function blankDraft(){
     input_date: todayIso(),
     date: '',
     date_range: '',
+    coverage_start: (coverageRangeForDay(todayIso())||{}).start||'',
+    coverage_end: (coverageRangeForDay(todayIso())||{}).end||'',
     title: '',
     link: '',
     links: {},              // region -> region-specific URL (used when >1 region chosen)
@@ -3337,6 +3383,8 @@ function draftFromSlide(s){
     input_date: s.input_date || '',
     date: s.date || '',
     date_range: s.date_range || '',
+    coverage_start: s.coverage_start || '',
+    coverage_end: s.coverage_end || '',
     title: s.title || '',
     link: (_regs[0] && _links[_regs[0]]) ? _links[_regs[0]] : (s.link || ''),
     links: (function(){ var m={}; _regs.forEach(function(r){ if (_links[r]) m[r]=_links[r]; }); return m; })(),
@@ -3559,12 +3607,17 @@ function renderAddPane(wrap){
       + '<div class="formgrid">'
         + '<div class="formfield"><label>Input date</label><input type="date" id="fInputDate" value="'+esc(d.input_date||'')+'"><span class="formfield__hint">The date this update was logged. Drives grouping, filtering and the presentation.</span></div>'
         + '<div class="formfield"><label>Platform</label><select id="fPlatform">'+optionsHtml(ALLOWED_PLATFORMS, d.platform)+'</select></div>'
-        + '<div class="formfield"><label>Publish date</label><input type="date" id="fDate" value="'+esc(d.date)+'"><span class="formfield__hint">Drives sorting, filtering and the presentation grouping.</span></div>'
-        + '<div class="formfield"><label>Period covered — label (optional)</label><input type="text" id="fRange" value="'+esc(d.date_range)+'" placeholder="e.g. Jun 29 – Jul 3"><span class="formfield__hint">Display text shown on the entry; free-form.</span></div>'
+
         + '<div class="formfield formfield--wide"><label>Title <span class="addphase__required">*</span></label><input type="text" id="fTitle" value="'+esc(d.title)+'" placeholder="Headline for this update"><small class="addphase__error" data-error-for="fTitle"></small></div>'
       + '</div>'
       + '<div class="addphase__section"><h3>2. Coverage &amp; official sources</h3><p>Select all affected markets and paste the announcement link for each region, when available.</p></div>'
       + '<div class="formgrid">'
+        + '<div class="formfield formfield--wide"><label>Coverage period *</label><select id="fCoverage">'+(function(){
+            var options=coverageOptions(d),selected=d.coverage_start&&d.coverage_end?d.coverage_start+'|'+d.coverage_end:'';
+            return options.map(function(o){return '<option value="'+esc(o.key)+'"'+(selected===o.key?' selected':'')+'>'+esc(o.label)+'</option>';}).join('')+'<option value="custom"'+(!selected?' selected':'')+'>Custom date range</option>';
+          })()+'</select><span class="formfield__hint">Wednesday–Monday: dates when the team obtained these updates. Choose an earlier batch for late encoding.</span><small class="addphase__error" data-error-for="fCoverage"></small></div>'
+        + '<div class="formfield" id="fCoverageStartWrap"><label>Coverage start</label><input type="date" id="fCoverageStart" value="'+esc(d.coverage_start||'')+'"></div>'
+        + '<div class="formfield" id="fCoverageEndWrap"><label>Coverage end</label><input type="date" id="fCoverageEnd" value="'+esc(d.coverage_end||'')+'"></div>'
         + regionFieldHtml(d, editing)
         + linkFieldHtml(d, editing)
       + '</div>'
@@ -3635,6 +3688,9 @@ function syncDraftFromForm(){
   d.input_date = g('fInputDate');
   d.date = g('fDate');
   d.date_range = g('fRange');
+  var cov=g('fCoverage');
+  if(cov==='custom'){d.coverage_start=g('fCoverageStart');d.coverage_end=g('fCoverageEnd');}
+  else if(cov&&cov.indexOf('|')!==-1){var parts=cov.split('|');d.coverage_start=parts[0];d.coverage_end=parts[1];}
   d.title = g('fTitle');
 
   // --- Region(s): checkbox multi-select (same for add and edit) ---
@@ -3688,6 +3744,21 @@ function wireAddPane(wrap){
     var el = document.getElementById(id); if (!el) return;
     el.addEventListener('input', function(){ syncDraftFromForm(); });
   });
+
+  var coverageSel=wrap.querySelector('#fCoverage');
+  if(coverageSel){
+    var toggleCoverage=function(){var custom=coverageSel.value==='custom';
+      ['fCoverageStartWrap','fCoverageEndWrap'].forEach(function(id){var node=wrap.querySelector('#'+id);if(node)node.hidden=!custom;});
+    };
+    coverageSel.addEventListener('change',function(){
+      if(coverageSel.value!=='custom'){
+        var parts=coverageSel.value.split('|');d.coverage_start=parts[0];d.coverage_end=parts[1];
+      }
+      toggleCoverage();
+    });
+    ['fCoverageStart','fCoverageEnd'].forEach(function(id){var el=wrap.querySelector('#'+id);if(el)el.addEventListener('change',function(){syncDraftFromForm();});});
+    toggleCoverage();
+  }
 
   // region multi-select: ticking a box may add/remove per-region link fields,
   // so capture current input then re-render the pane (applies to add and edit).
@@ -4030,6 +4101,7 @@ function insertPasteAtCursor(editor,html){
 function validateAddUpdate(d){
   var errors=[];
   if(!d.title||!d.title.trim())errors.push({field:'fTitle',message:'Enter an announcement title.'});
+  if(!coverageDate(d.coverage_start)||!coverageDate(d.coverage_end)||d.coverage_start>d.coverage_end)errors.push({field:'fCoverage',message:'Choose a valid coverage start and end date.'});
   if(!d.input_date||!/^\d{4}-\d{2}-\d{2}$/.test(d.input_date)||isNaN(Date.parse(d.input_date)))errors.push({field:'fInputDate',message:'Choose a valid input date.'});
   if(d.date&&(!/^\d{4}-\d{2}-\d{2}$/.test(d.date)||isNaN(Date.parse(d.date))))errors.push({field:'fDate',message:'Choose a valid publish date, or leave it blank if unknown.'});
   if(!Array.isArray(d.regions)||!d.regions.length)errors.push({field:'fRegions',message:'Select at least one region.'});
@@ -4115,7 +4187,9 @@ function saveEntry(wrap){
     link: links[regions[0]] || '',
     input_date: d.input_date || '',
     date: d.date || '',
-    date_range: d.date_range.trim(),
+    date_range: d.coverage_start&&d.coverage_end?coverageLabel(d.coverage_start,d.coverage_end):(d.date_range||''),
+    coverage_start: d.coverage_start,
+    coverage_end: d.coverage_end,
     title: d.title.trim(),
     body: body
   };
@@ -4168,14 +4242,8 @@ function saveEntry(wrap){
 // confirmed). Falling back to date_range — and finally to an explicit
 // "Undated" bucket — means the dropdown always accounts for every slide,
 // instead of silently dropping undated ones once a specific date is chosen.
-function presentDateKey(s){
-  if (s.input_date) return 'i:' + s.input_date;
-  return '__undated__';
-}
-function presentDateLabel(s){
-  if (s.input_date) return fmtDate(s.input_date);
-  return 'No input date';
-}
+function presentDateKey(s){return coverageKey(s);}
+function presentDateLabel(s){return coverageDisplay(s);}
 
 function buildPresentOrder(){
   var list = filteredSlides().slice();
@@ -4191,7 +4259,7 @@ function buildPresentOrder(){
     // grouped by their date_range (or "Undated") instead of scattering.
     var ka = presentDateKey(a), kb = presentDateKey(b);
     if (ka !== kb){
-      var da = a.input_date || '', db = b.input_date || '';
+      var da = (entryCoverage(a)||{}).start||a.input_date||'', db = (entryCoverage(b)||{}).start||b.input_date||'';
       if (!da && !db) return presentDateLabel(a).localeCompare(presentDateLabel(b));
       if (!da) return 1;
       if (!db) return -1;
@@ -4216,7 +4284,7 @@ function populatePresentDates(){
   var groups = {}; // key -> { label, sortDate, count }
   all.forEach(function(s){
     var key = presentDateKey(s);
-    if (!groups[key]) groups[key] = { label: presentDateLabel(s), sortDate: s.input_date || '', count: 0 };
+    if (!groups[key]) groups[key] = { label: presentDateLabel(s), sortDate: (entryCoverage(s)||{}).start||s.input_date||'', count: 0 };
     groups[key].count++;
   });
   var keys = Object.keys(groups).sort(function(ka, kb){
@@ -4232,7 +4300,7 @@ function populatePresentDates(){
   if (state.present.dateFilter !== '__all__' && !groups[state.present.dateFilter]){
     state.present.dateFilter = '__all__';
   }
-  var opts = '<option value="__all__">All dates ('+all.length+')</option>';
+  var opts = '<option value="__all__">All coverage periods ('+all.length+')</option>';
   opts += keys.map(function(k){
     var g = groups[k];
     return '<option value="'+esc(k)+'"'+(state.present.dateFilter===k?' selected':'')+'>'+esc(g.label)+' ('+g.count+')</option>';
@@ -4304,7 +4372,7 @@ function renderPresent(){
   // breadcrumb: date › region(s) › platform
   var pRegs = entryRegions(s);
   crumbs.innerHTML =
-    '<span class="present__crumb present__crumb--date">'+esc(s.input_date ? fmtDate(s.input_date) : 'No input date')+'</span>'
+    '<span class="present__crumb present__crumb--date">'+esc(coverageDisplay(s))+'</span>'
     + '<span class="present__crumbsep">&rsaquo;</span>'
     + '<span class="present__crumb">'+esc(pRegs.join(', '))+'</span>'
     + '<span class="present__crumbsep">&rsaquo;</span>'
@@ -4329,7 +4397,7 @@ function renderPresent(){
       + '<div class="present__eyebrow">'
         + '<span class="present__tag present__tag--platform">'+esc(s.platform)+'</span>'
         + pRegs.map(function(r){ return '<span class="present__tag">'+esc(r)+'</span>'; }).join('')
-        + (s.input_date ? '<span class="present__tag">'+esc(fmtDate(s.input_date))+'</span>' : '')
+        + '<span class="present__tag">'+esc(coverageDisplay(s))+'</span>'
       + '</div>'
       + '<h1 class="present__title">'+esc(s.title)+'</h1>'
       + presentLinkHtml
