@@ -4194,6 +4194,7 @@ function saveSharedDraft(wrap){
   var id=d.draftId||('draft-'+now+'-'+Math.random().toString(36).slice(2,9));
   var previous=sharedDrafts.find(function(x){return x.draftId===id;});
   var item=JSON.parse(JSON.stringify(d));
+  item.body=(item.body||[]).map(function(block){var clean=Object.assign({},block);delete clean.uploading;return clean;});
   item.draftId=id;item.id=null;item.updatedAt=now;item.updatedBy=who;
   item.createdAt=previous?previous.createdAt:now;
   item.createdBy=previous?previous.createdBy:who;
