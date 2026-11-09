@@ -4349,6 +4349,57 @@ function saveEntry(wrap){
     body: body
   };
 
+  // Draft publication is a single shared-store transaction: add the entry and
+  // remove its source draft together, rather than racing two separate writes.
+  if(d.draftId && !d.id){
+    var sourceDraftId=d.draftId;
+    var publishBtn=wrap.querySelector('#saveEntryBtn');
+    if(publishBtn)publishBtn.disabled=true;
+    setSyncStatus('Publishing draft to shared storage…');
+    _syncPushChain.then(function(){return AUTH.pull();}).then(function(remote){
+      var existing=(remote.slides||[]).find(function(x){return x.originDraftId===sourceDraftId;});
+      var published=Object.assign({},payload);
+      if(existing){
+        // A previous attempt may have committed despite a lost response.
+        published=existing;
+      }else{
+        published.id=nextId();
+        published.slide_num=nextSlideNum();
+        published.createdBy=who;published.createdAt=now;
+        published.updatedBy=who;published.updatedAt=now;
+        published.originDraftId=sourceDraftId;
+      }
+      var updated=Object.assign({},remote,{
+        slides:existing?(remote.slides||[]):(remote.slides||[]).concat([published]),
+        drafts:(remote.drafts||[]).filter(function(x){return x.draftId!==sourceDraftId;})
+      });
+      return AUTH.push(updated).then(function(){return published;});
+    }).then(function(published){
+      // Verify both sides of the transition before clearing the editor.
+      return AUTH.pull().then(function(check){
+        var stored=(check.slides||[]).find(function(x){return x.id===published.id;});
+        if(!stored||(check.drafts||[]).some(function(x){return x.draftId===sourceDraftId;})){
+          throw new Error('Published entry or draft removal could not be verified');
+        }
+        slides=check.slides;
+        sharedDrafts=check.drafts;
+        state.execHtml=null;state.digestHtml=null;
+        if(HAS_STORAGE){
+          _idbWriteChain=_idbWriteChain.then(function(){return idbSet(IDB_KEY,{savedAt:Date.now(),slides:slides});}).catch(function(){});
+        }
+        state.editDraft=blankDraft();markAddSaved();
+        renderAddPane(wrap);
+        setSyncStatus('Draft published and removed from Shared Drafts ✓',true);
+        setStatus('Published "'+stored.title+'" and removed its shared draft.',true);
+      });
+    }).catch(function(err){
+      if(publishBtn&&publishBtn.isConnected)publishBtn.disabled=false;
+      setSyncStatus('Draft publish not confirmed: '+(err.message||err),false);
+      setStatus('Could not confirm draft publication. Your form is preserved. Please retry or check Existing Entries before trying again.',false);
+    });
+    return;
+  }
+
   if (d.id){
     var idx = slides.findIndex(function(s){ return s.id === d.id; });
     if (idx !== -1){
