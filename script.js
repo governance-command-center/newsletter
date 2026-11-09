@@ -1245,7 +1245,7 @@ function renderCard(s){
   var links = entryLinks(s);
   var regionPills = regs.map(function(r){ return '<span class="pill">'+esc(r)+'</span>'; }).join('');
   var excerpt=excerptOf(s)||'No text summary available. Open details to view this announcement.';
-  if(excerpt.length>220)excerpt=excerpt.slice(0,217).replace(/\\s+\\S*$/,'')+'…';
+  if(excerpt.length>220)excerpt=excerpt.slice(0,217).replace(/\s+\S*$/,'')+'…';
   // Link row: single "Read more" for one region; per-region links when several.
   var linkRow;
   if (regs.length > 1){
