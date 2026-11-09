@@ -1357,3 +1357,11 @@ input:not([type=checkbox]):not([type=radio]),select,textarea{border-radius:9px}
 .card__coverage{font-weight:600;}
 .card__excerpt{overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;}
 .card__full.is-open{overflow-wrap:anywhere;}
+
+/* Library reading refinements: wider cards, compact images, no repeated excerpt */
+.app{max-width:1560px;}
+.card__full img{display:block;width:auto;max-width:100%;max-height:390px;object-fit:contain;cursor:zoom-in;}
+.library-lightbox{position:fixed;inset:0;z-index:100000;background:rgba(5,14,29,.91);display:flex;align-items:center;justify-content:center;padding:60px 30px 30px;}
+.library-lightbox img{display:block;max-width:100%;max-height:100%;object-fit:contain;box-shadow:0 15px 50px rgba(0,0,0,.4);}
+.library-lightbox__close{position:absolute;top:16px;right:24px;border:1px solid rgba(255,255,255,.4);border-radius:8px;background:#fff;color:#19314d;padding:9px 15px;font-weight:700;cursor:pointer;}
+@media(max-width:720px){.card__full img{max-height:300px;}.library-lightbox{padding:65px 12px 20px;}}
