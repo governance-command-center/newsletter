@@ -4211,7 +4211,7 @@ function saveSharedDraft(wrap){
     renderAddPane(wrap);
   }).catch(function(err){
     setSyncStatus('Could not save draft: '+(err.message||err),false);
-    setStatus('Draft save failed. Your form is still here; please retry.',false);
+    setStatus('Draft save failed: '+(err&&err.message?err.message:'Unknown storage error')+'. Your form is still here; please retry.',false);
   });
 }
 
