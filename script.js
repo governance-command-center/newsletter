@@ -2884,9 +2884,9 @@ function approvedEmailHtml(list){
     +'<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#edf2f7"><tr><td align="center" style="padding:22px 12px">'
     +'<table role="presentation" width="760" cellspacing="0" cellpadding="0" style="width:100%;max-width:760px;background:white">'
     +'<tr><td bgcolor="#102b4c" style="background:#102b4c;border-top:5px solid #27c3d8;padding:36px 38px">'
-    +'<div style="color:#7ddde7;font-size:11px;letter-spacing:2px;font-weight:bold">SYNAGIE / MERCHANDISING INTELLIGENCE</div>'
-    +'<div style="color:white;font-size:30px;font-weight:bold;line-height:1.3;margin-top:16px">Marketplace updates,<br>made easy to scan.</div>'
-    +'<div style="color:#c8dce9;font-size:14px;margin-top:15px">'+esc(period)+' &nbsp;·&nbsp; Regional marketplace digest</div></td></tr>'
+    +'<div style="color:#9ed9e6;font-size:12px;letter-spacing:1.6px;font-weight:bold">MERCHANDISING NEWSLETTER</div>'
+    +'<div style="color:#ffffff;font-size:29px;font-weight:bold;line-height:1.3;margin-top:14px">Marketplace Updates at a Glance</div>'
+    +'<div style="color:#c8dce9;font-size:14px;margin-top:14px">'+esc(period)+'</div></td></tr>'
     +'<tr><td bgcolor="#eaf8fc" style="padding:22px 38px;background:#eaf8fc">'
     +'<div style="color:#347d8f;font-size:11px;letter-spacing:2px;font-weight:bold">AT A GLANCE</div>'
     +'<div style="color:#102b4c;font-size:16px;font-weight:bold;margin-top:8px">'+grouped.platforms.length+' platforms &nbsp;·&nbsp; '+list.length+' updates &nbsp;·&nbsp; Regional coverage</div>'
@@ -2917,8 +2917,10 @@ function approvedEmailHtml(list){
 }
 function approvedPrintHtml(list){
   var grouped=approvedGroups(list),html='<div class="approved-pdf" style="max-width:800px;margin:auto;padding:22px 36px;background:white;color:#152d49;font-family:Arial,sans-serif">'
-    +'<h1 style="text-align:center;font-size:25px;margin:10px 0 12px">Merchandising Newsletter</h1>'
-    +'<p style="text-align:center;font-size:12px;color:#64788a;margin:0 0 35px">Marketplace updates for '+esc(periodCoveredLabel(list))+'</p>';
+    +'<div style="margin:0 0 35px;padding:25px 28px;background:#102b4c;border-top:4px solid #27c3d8;color:#fff">'
+    +'<div style="font-size:11px;letter-spacing:1.5px;color:#9ed9e6;font-weight:bold">MERCHANDISING NEWSLETTER</div>'
+    +'<h1 style="font-size:23px;line-height:1.3;margin:12px 0 10px;color:#fff">Marketplace Updates at a Glance</h1>'
+    +'<div style="font-size:12px;color:#c8dce9">'+esc(periodCoveredLabel(list))+'</div></div>';
   grouped.platforms.forEach(function(p){
     html+='<h2 style="font-size:19px;margin:28px 0 14px;page-break-after:avoid">'+esc(p==='Tiktok'?'TikTok':p)+'</h2>';
     approvedRegions(grouped.groups[p]).forEach(function(reg){
@@ -2945,8 +2947,16 @@ function approvedPdfVector(list,label,jsPDFCtor){
     var lines=doc.splitTextToSize(String(text||'').replace(/[^\x20-\x7e\n]/g,' ').replace(/\s+/g,' ').trim(),max);
     lines.forEach(function(line){next(leading||size*1.55);doc.text(line,margin,y);y+=leading||size*1.55;});
   }
-  doc.setFont('helvetica','bold');doc.setFontSize(22);doc.setTextColor(20,43,70);doc.text('Merchandising Newsletter',W/2,y,{align:'center'});y+=28;
-  doc.setFont('helvetica','normal');doc.setFontSize(10);doc.text('Marketplace updates for '+periodCoveredLabel(list),W/2,y,{align:'center'});y+=42;
+  // Match the approved email's editorial header in the generated PDF.
+  doc.setFillColor(16,43,76);doc.rect(0,0,W,154,'F');
+  doc.setFillColor(39,195,216);doc.rect(0,0,W,4,'F');
+  doc.setFont('helvetica','bold');doc.setFontSize(10);doc.setTextColor(158,217,230);
+  doc.text('MERCHANDISING NEWSLETTER',margin,42);
+  doc.setFontSize(21);doc.setTextColor(255,255,255);
+  doc.text('Marketplace Updates at a Glance',margin,79);
+  doc.setFont('helvetica','normal');doc.setFontSize(11);doc.setTextColor(200,220,233);
+  doc.text(periodCoveredLabel(list),margin,108);
+  y=184;
   var grouped=approvedGroups(list);
   grouped.platforms.forEach(function(p){
     next(45);draw(p==='Tiktok'?'TikTok':p,17,true,[20,43,70],25);y+=7;
