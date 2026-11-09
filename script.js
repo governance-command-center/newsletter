@@ -1268,7 +1268,7 @@ function renderCard(s){
           + '<span class="pill card__coverage">'+esc(coverageDisplay(s))+'</span>'
         + '</div>'
         + authorLine(s)
-        + '<p class="card__excerpt">'+esc(excerpt)+'</p>'
+        + (isOpen?'':'<p class="card__excerpt">'+esc(excerpt)+'</p>')
         + '<div class="card__row">'
           + linkRow
           + '<button type="button" class="card__toggle" data-id="'+esc(s.id)+'" aria-expanded="'+(isOpen?'true':'false')+'">'+(isOpen ? 'Collapse details' : 'Expand details')+'</button>'
@@ -1306,6 +1306,33 @@ function renderMain(){
 
   app.innerHTML = html;
 
+  // Open a full-size image in a contained lightbox without altering the announcement.
+  app.querySelectorAll('.card__full img').forEach(function(img){
+    img.setAttribute('tabindex','0');
+    img.setAttribute('role','button');
+    img.setAttribute('aria-label','View full image');
+    var show=function(){
+      var overlay=document.createElement('div');
+      overlay.className='library-lightbox';
+      overlay.setAttribute('role','dialog');
+      overlay.setAttribute('aria-modal','true');
+      overlay.setAttribute('aria-label','Full announcement image');
+      var full=document.createElement('img');
+      full.src=img.currentSrc||img.src;
+      full.alt=img.alt||'Announcement image';
+      var close=document.createElement('button');
+      close.type='button';close.className='library-lightbox__close';close.textContent='Close ×';
+      overlay.appendChild(close);overlay.appendChild(full);document.body.appendChild(overlay);
+      var previous=document.activeElement;
+      var onKey=function(e){if(e.key==='Escape'){e.preventDefault();hide();}};
+      var hide=function(){document.removeEventListener('keydown',onKey);overlay.remove();if(previous&&previous.isConnected)previous.focus();};
+      close.addEventListener('click',hide);
+      overlay.addEventListener('click',function(e){if(e.target===overlay)hide();});
+      document.addEventListener('keydown',onKey);close.focus();
+    };
+    img.addEventListener('click',show);
+    img.addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();show();}});
+  });
   app.querySelectorAll('.card__toggle').forEach(function(btn){
     btn.addEventListener('click', function(){
       var id = btn.getAttribute('data-id');
