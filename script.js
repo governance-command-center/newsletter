@@ -4498,8 +4498,9 @@ function presentDateKey(s){return coverageKey(s);}
 function presentDateLabel(s){return coverageDisplay(s);}
 
 function buildPresentOrder(){
-  var list = filteredSlides().slice();
-  // Narrow to a single publish date when one is chosen in the present bar.
+  // Presentation is independent of Library search, platform, region and coverage filters.
+  var list = slides.slice();
+  // Narrow to a single coverage period only when explicitly selected.
   var df = state.present.dateFilter;
   if (df && df !== '__all__'){
     list = list.filter(function(s){ return presentDateKey(s) === df; });
@@ -4507,7 +4508,7 @@ function buildPresentOrder(){
   var regionRank = function(r){ var i = ALLOWED_REGIONS.indexOf(r); return i === -1 ? 999 : i; };
   var platRank = function(p){ var i = ALLOWED_PLATFORMS.indexOf(p); return i === -1 ? 999 : i; };
   list.sort(function(a,b){
-    // date: newest first; entries without an exact date sink to the bottom,
+    // Coverage: newest first; legacy entries use their recorded input dates,
     // grouped by their date_range (or "Undated") instead of scattering.
     var ka = presentDateKey(a), kb = presentDateKey(b);
     if (ka !== kb){
@@ -4532,7 +4533,8 @@ function buildPresentOrder(){
 function populatePresentDates(){
   var sel = document.getElementById('presentDateSelect');
   if (!sel) return;
-  var all = filteredSlides();
+  // Always list every published coverage period, regardless of Library filters.
+  var all = slides;
   var groups = {}; // key -> { label, sortDate, count }
   all.forEach(function(s){
     var key = presentDateKey(s);
