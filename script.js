@@ -3597,6 +3597,22 @@ function linkFieldHtml(d, editing){
     + '<input type="url" id="fLink" value="'+esc(single||'')+'" placeholder="https://…"></div>';
 }
 
+
+/* Existing Entries: coverage-first grouping, with legacy records labeled by input date. */
+function entryCoverageGroups(list){
+  var groups={};
+  (list||[]).forEach(function(item){
+    var key=coverageKey(item);
+    if(!groups[key])groups[key]={key:key,label:coverageDisplay(item),count:0,sort:(entryCoverage(item)||{}).start||item.input_date||''};
+    groups[key].count++;
+  });
+  return Object.keys(groups).map(function(k){return groups[k];}).sort(function(a,b){return b.sort.localeCompare(a.sort);});
+}
+function entryCoverageOptionsHtml(list,selected){
+  return '<option value="__all__"'+(selected==='__all__'?' selected':'')+'>All coverage periods ('+list.length+')</option>'+
+    entryCoverageGroups(list).map(function(g){return '<option value="'+esc(g.key)+'"'+(selected===g.key?' selected':'')+'>'+esc(g.label)+' ('+g.count+')</option>';}).join('');
+}
+
 function renderAddPane(wrap){
   if (!state.editDraft){state.editDraft=blankDraft();markAddSaved();}
   var d = state.editDraft;
@@ -3606,22 +3622,14 @@ function renderAddPane(wrap){
     ? d.body.map(detailBlockHtml).join('')
     : '<div class="detailblock__empty" style="padding:14px;text-align:center;">No details yet — add a text block or image below. You can paste tables directly into a text block.</div>';
 
-  // Existing entries list (edit/delete + select-to-archive). The input-date
-  // filter narrows which entries show, so you can archive one date's batch
-  // without hunting through the whole table. Rows are grouped by input date,
-  // then by region in the order PH-MY-SG-TH-VN.
+  // Existing entries: coverage-period filter, with legacy input-date fallback.
   var entryFilter = state.entryDateFilter || '__all__';
   // If the chosen date no longer exists (e.g. after archiving it), fall back.
   if (entryFilter !== '__all__' && !slides.some(function(s){
-        var k = s.input_date ? s.input_date : NO_INPUT_DATE_KEY; return k === entryFilter; })){
+        return coverageKey(s) === entryFilter; })){
     entryFilter = state.entryDateFilter = '__all__';
   }
-  // Prune any selected weeks that no longer exist.
-  var entryWeekKeys = weekGroups(slides).map(function(g){ return g.key; });
-  state.entryWeekFilter = (state.entryWeekFilter || []).filter(function(k){ return entryWeekKeys.indexOf(k) !== -1; });
-  var visibleSlides = slidesByInputDate(slides, entryFilter).filter(function(s){
-    return weekSelectionMatches(state.entryWeekFilter, s);
-  });
+  var visibleSlides=slides.filter(function(s){return entryFilter==='__all__'||coverageKey(s)===entryFilter;});
 
   function entryRowHtml(s){
     return '<tr>'
@@ -3640,7 +3648,7 @@ function renderAddPane(wrap){
     + '</tr>';
   }
 
-  // Build grouped rows: first by input date (newest first), then by region
+  // Build grouped rows: first by coverage period (newest first), then by region
   // (PH-MY-SG-TH-VN). An entry covering several regions appears once, filed
   // under its first region in that order.
   var COLSPAN = 8;
@@ -3649,10 +3657,10 @@ function renderAddPane(wrap){
     if (!regs.length) return '';
     return regs.slice().sort(function(a,b){ return regionGroupRank(a) - regionGroupRank(b); })[0];
   }
-  var idGroups = inputDateGroups(visibleSlides); // ordered newest-first, incl. no-input bucket
+  var idGroups = entryCoverageGroups(visibleSlides); // newest coverage first; legacy entries remain visible
   var listRows = idGroups.map(function(g){
     var inGroup = visibleSlides.filter(function(s){
-      var k = s.input_date ? s.input_date : NO_INPUT_DATE_KEY; return k === g.key;
+      return coverageKey(s) === g.key;
     });
     // partition by region order
     var byRegion = {};
@@ -3685,7 +3693,7 @@ function renderAddPane(wrap){
 
       + '<div class="addphase__section"><h3>1. Basic information</h3><p>Log when the team encoded this update and select the marketplace.</p></div>'
       + '<div class="formgrid">'
-        + '<div class="formfield"><label>Input date</label><input type="date" id="fInputDate" value="'+esc(d.input_date||'')+'"><span class="formfield__hint">The date this update was logged. Drives grouping, filtering and the presentation.</span></div>'
+        + '<div class="formfield"><label>Input date</label><input type="date" id="fInputDate" value="'+esc(d.input_date||'')+'"><span class="formfield__hint">The date this update was encoded. Coverage Period controls reporting and presentation filters.</span></div>'
         + '<div class="formfield"><label>Platform</label><select id="fPlatform">'+optionsHtml(ALLOWED_PLATFORMS, d.platform)+'</select></div>'
 
         + '<div class="formfield formfield--wide"><label>Title <span class="addphase__required">*</span></label><input type="text" id="fTitle" value="'+esc(d.title)+'" placeholder="Headline for this update"><small class="addphase__error" data-error-for="fTitle"></small></div>'
@@ -3740,16 +3748,12 @@ function renderAddPane(wrap){
     + '</div>'
     + '<div class="panel">'
       + '<div class="panel__head"><h2 class="panel__title">Existing entries ('+slides.length+')</h2></div>'
-      + '<p class="panel__hint">Edit or remove any entry. Entries are grouped by <strong>input date</strong>, then by region (PH-MY-SG-TH-VN). Filter by <strong>input date</strong> to isolate one batch, then tick entries and use <strong>Archive selected</strong> to set them aside — archived entries leave the browse, presentation and email/PDF views but can be restored anytime from the Archive tab. Saved to this browser.</p>'
+      + '<p class="panel__hint">Edit or remove any entry. Entries are grouped by <strong>coverage period</strong>, then by region (PH-MY-SG-TH-VN). Filter by <strong>coverage period</strong> to isolate one batch, then tick entries and use <strong>Archive selected</strong> to set them aside — archived entries leave the browse, presentation and email/PDF views but can be restored anytime from the Archive tab. Saved in shared storage.</p>'
       + (slides.length
         ? '<div class="datefilterbar">'
-            + '<label class="datefilterbar__label" for="entryDateFilter">Filter by input date</label>'
-            + '<select id="entryDateFilter" class="datefilterbar__select">'+inputDateOptionsHtml(slides, entryFilter)+'</select>'
+            + '<label class="datefilterbar__label" for="entryDateFilter">Filter by coverage period</label>'
+            + '<select id="entryDateFilter" class="datefilterbar__select">'+entryCoverageOptionsHtml(slides, entryFilter)+'</select>'
             + '<span class="datefilterbar__count">Showing '+visibleSlides.length+' of '+slides.length+'</span>'
-          + '</div>'
-          + '<div class="weekfilterwrap">'
-            + '<div class="weekfilterwrap__label">Filter by week'+((state.entryWeekFilter&&state.entryWeekFilter.length)?' — '+state.entryWeekFilter.length+' selected':'')+'</div>'
-            + weekMultiSelectHtml(slides, state.entryWeekFilter, 'entry')
           + '</div>'
           + '<div class="archivebar">'
             + '<label class="archivebar__all"><input type="checkbox" id="archiveSelectAll"> Select all'+(entryFilter!=='__all__'?' shown':'')+'</label>'
@@ -3759,7 +3763,7 @@ function renderAddPane(wrap){
           + '</div>'
           + (listRows
             ? '<table class="entrytable"><thead><tr><th class="entrytable__check"></th><th>Title</th><th>Platform</th><th>Region</th><th>Input date</th><th>Added by</th><th>Timestamp</th><th></th></tr></thead><tbody>'+listRows+'</tbody></table>'
-            : '<div class="detailblock__empty">No entries with this input date.</div>')
+            : '<div class="detailblock__empty">No entries in this coverage period.</div>')
         : '<div class="detailblock__empty">No entries yet.</div>')
     + '</div>';
 
