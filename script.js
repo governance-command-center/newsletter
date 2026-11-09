@@ -237,7 +237,7 @@ var AUTH = (function(){
     getImgbbKey:getImgbbKey, uploadImage:uploadImage,
     loadSession:loadSession, getSession:function(){ return session; },
     login:login, logout:logout, isAdmin:isAdmin,
-    pull:pull, bootstrap:bootstrap, blankRemote:blankRemote,
+    pull:pull, push:push, bootstrap:bootstrap, blankRemote:blankRemote,
     createUser:createUser, updateUser:updateUser, resetPassword:resetPassword, deleteUser:deleteUser, setRole:setRole, listUsers:listUsers,
     pullData:pullData, pushData:pushData, getRemote:function(){ return remote; }
   };
