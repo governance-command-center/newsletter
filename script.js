@@ -3569,6 +3569,7 @@ function renderAddPane(wrap){
         + linkFieldHtml(d, editing)
       + '</div>'
       + '<small class="addphase__error" data-error-for="fRegions"></small>'
+      + '<small class="addphase__error" data-error-for="fLinks"></small>'
       + '<div class="addphase__section"><h3>3. Announcement details</h3><p>Paste directly from Lazada University or Seller Center. Smart Paste keeps useful structure but removes source styling.</p></div>'
 
       + '<div class="detailhead">'
@@ -3683,7 +3684,7 @@ function wireAddPane(wrap){
   var d = state.editDraft;
 
   // simple field bindings (kept live so syncDraftFromForm always has fresh values)
-  ['fPlatform','fRegion','fDate','fRange','fTitle','fLink'].forEach(function(id){
+  ['fPlatform','fInputDate','fRegion','fDate','fRange','fTitle','fLink'].forEach(function(id){
     var el = document.getElementById(id); if (!el) return;
     el.addEventListener('input', function(){ syncDraftFromForm(); });
   });
@@ -4034,7 +4035,7 @@ function validateAddUpdate(d){
   if(!Array.isArray(d.regions)||!d.regions.length)errors.push({field:'fRegions',message:'Select at least one region.'});
   var urls=(d.regions||[]).map(function(r){return d.links&&d.links[r]||'';}).filter(Boolean);
   if(!urls.length&&d.link)urls.push(d.link);
-  urls.forEach(function(url){try{var parsed=new URL(url);if(!/^https?:$/.test(parsed.protocol))throw Error('bad');}catch(e){errors.push({field:'fLinks',message:'Source URLs must start with https:// or http://.'});}});
+  urls.forEach(function(url){try{var parsed=new URL(String(url).trim());if(!/^https?:$/.test(parsed.protocol)||!parsed.hostname)throw Error('bad');}catch(e){errors.push({field:'fLinks',message:'Source URLs must start with https:// or http://.'});}});
   if(d.body.some(function(b){return b.type==='image'&&b.uploading;}))errors.push({field:'fDetails',message:'Wait until image uploads finish.'});
   var hasBody=d.body.some(function(b){return b.type==='rich'&&richToText(b.html||'')||b.type==='table'&&(b.rows||[]).some(function(row){return row.some(function(cell){return String(cell).trim();});})||b.type==='image'&&!!b.dataUrl;});
   if(!hasBody)errors.push({field:'fDetails',message:'Add announcement details before saving.'});
