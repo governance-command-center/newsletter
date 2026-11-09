@@ -1166,3 +1166,27 @@ input[type="file"]{display:none;}
   .memberrow__actions{ justify-self:start; }
   .memberrow__editform{ grid-template-columns:1fr; }
 }
+
+/* PRESENTATION PHASE 1 — isolated screen-sharing typography and contrast. */
+.present__stage{padding:clamp(20px,3vw,44px) clamp(18px,3vw,48px) 56px;align-items:flex-start;}
+.present__card{width:100%;max-width:1120px;min-width:0;margin:0 auto;}
+.present__title{font-size:clamp(28px,3.4vw,44px);line-height:1.2;overflow-wrap:anywhere;}
+.present__content{font-size:clamp(17px,1.45vw,20px);line-height:1.65;color:#dbe6f6;min-width:0;overflow-wrap:anywhere;}
+/* Override pasted inline colors only within presentation; keep semantic bold/italic. */
+.present__content :is(p,div,span,li,ul,ol,blockquote,em,strong,b,i,u),
+.present__content .rich :is(p,div,span,li,ul,ol,blockquote,em,strong,b,i,u){color:#dbe6f6 !important;}
+.present__content :is(h4,h4 *,h5,h5 *),
+.present__content .rich :is(h4,h4 *,h5,h5 *){color:#fff !important;}
+.present__content :is(a,a *),.present__content .rich :is(a,a *){color:#85d9e8 !important;}
+.present__content h4,.present__content .rich h4{font-size:1.13em;font-weight:700;line-height:1.4;margin:24px 0 10px;}
+.present__content p,.present__content .rich p{margin:0 0 14px;}
+.present__content ul,.present__content ol{padding-left:1.45em;margin:0 0 16px;}
+.present__content li{margin-bottom:7px;}
+.present__content img,.present__content .card__img{display:block;width:auto;height:auto;max-width:min(100%,960px);max-height:65vh;object-fit:contain;margin:18px auto 22px;border-radius:9px;border:1px solid rgba(255,255,255,.16);}
+.present__content table,.present__content .rich table{width:100%;max-width:100%;table-layout:fixed;border-collapse:collapse;font-size:clamp(14px,1.1vw,17px);line-height:1.5;margin:18px 0 24px;background:rgba(255,255,255,.035);}
+.present__content :is(th,td),.present__content .rich :is(th,td){color:#dbe6f6 !important;border:1px solid rgba(210,229,246,.24);padding:12px 14px;vertical-align:top;overflow-wrap:anywhere;word-break:normal;background:transparent;}
+.present__content th,.present__content .rich th,.present__content .rich table tr:first-child td{background:#23476c !important;color:#fff !important;font-weight:700;}
+.present__content th *,.present__content .rich th *,.present__content .rich table tr:first-child td *{color:#fff !important;}
+.present__content tr:nth-child(even) td{background:rgba(255,255,255,.055);}
+.present__content .rich{color:#dbe6f6;line-height:inherit;font-size:inherit;}
+@media(max-width:720px){.present__stage{padding:20px 16px 40px;}.present__content{font-size:16px;}.present__content :is(th,td){padding:9px 8px;}}
