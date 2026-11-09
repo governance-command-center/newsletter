@@ -3097,29 +3097,12 @@ function emailBodyFragment(fullHtml){
   var body = /<body[^>]*>([\s\S]*?)<\/body>/i.exec(fullHtml);
   var inner = body ? body[1] : fullHtml;
 
-  // The outer wrappers are `width:100%` tables carrying the page background and
-  // the centring padding. Nested inside the compose window's OWN table they
-  // collapse and squeeze the content, so we hand the client the inner card table
-  // directly.
-  var card = /<table role="presentation" width="760"[\s\S]*<\/table>/i.exec(inner);
-  if (!card) return inner;
-
-  var html = card[0];
-
-  // Drop the trailing </td></tr></table> tails belonging to the wrappers we cut.
-  html = html.replace(/(<\/table>)(?:\s*<\/td>\s*<\/tr>\s*<\/table>)+\s*$/i, '$1');
-
-  // A 640px-wide email body is right for a *received* email, but wrong for a
-  // paste: it leaves the card as a narrow column in a wide compose window. Two
-  // things pin it, and BOTH have to go —
-  //   1. width="640" as an HTML attribute. Outlook renders through Word, which
-  //      honours the attribute over CSS, so this alone keeps it at 640.
-  //   2. max-width:640px in the inline style, which caps it even at width:100%.
-  html = html.replace(/(<table role="presentation")\s+width="760"/i, '$1 width="100%"');
-  html = html.replace(/max-width:760px;\s*/i, '');
-  html = html.replace(/(<table role="presentation" width="100%"[^>]*style=")/i, '$1width:100%;');
-
-  return html;
+  // Preserve the OUTER light-blue canvas when copying to Outlook. Previously
+  // the clipboard extracted only the white card, then stretched it to 100%,
+  // removing the surrounding blue margin visible in the approved newsletter.
+  // Tables with bgcolor and inline background survive Outlook's Word renderer
+  // more consistently than body background styles.
+  return inner;
 }
 
 // Writes the styled email to the clipboard as BOTH rich HTML and plain text.
