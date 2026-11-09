@@ -492,6 +492,7 @@ var state = {
   digestHtml: null,           // last generated regional digest HTML
   selectedForDelete: new Set(),  // slide ids ticked in the Manage/Delete pane
   editDraft: null,            // in-progress add/edit entry (null until the Add pane builds one)
+  addBaseline: null,         // snapshot of last saved/opened state for unsaved-change warnings
   entryDateFilter: '__all__', // Existing-entries list: input-date filter (for choosing what to archive)
   entryWeekFilter: [],        // Existing-entries: multi-week selection (empty = all weeks)
   archiveWeekFilter: [],      // Archive: multi-week selection (empty = all weeks)
@@ -3399,8 +3400,67 @@ function draftFromSlide(s){
   };
 }
 
-function startNewEntry(){ state.editDraft = blankDraft(); setNav('add'); }
+
+/* Phase 2B: compare actual form content with the last saved/opened version. */
+function addSnapshot(d){
+  if(!d)return '';
+  return JSON.stringify({
+    id:d.id||null,draftId:d.draftId||null,platform:d.platform||'',input_date:d.input_date||'',
+    coverage_start:d.coverage_start||'',coverage_end:d.coverage_end||'',
+    title:d.title||'',regions:(d.regions||[]).slice(),links:d.links||{},body:d.body||[]
+  });
+}
+function markAddSaved(){state.addBaseline=addSnapshot(state.editDraft);}
+function addHasUnsavedChanges(){
+  if(!state.editDraft||state.addBaseline===null)return false;
+  if(state.nav==='add'&&document.getElementById('fTitle'))syncDraftFromForm();
+  return addSnapshot(state.editDraft)!==state.addBaseline;
+}
+function confirmDiscardAdd(){
+  return !addHasUnsavedChanges()||window.confirm('You have unsaved changes in Add Update. Leave without saving?');
+}
+window.addEventListener('beforeunload',function(e){
+  if(state.nav==='add'&&addHasUnsavedChanges()){e.preventDefault();e.returnValue='';}
+});
+function showAddPreview(){
+  syncDraftFromForm();
+  var d=state.editDraft;if(!d)return;
+  var existing=document.getElementById('addPreviewOverlay');
+  if(existing)existing.remove();
+  var overlay=document.createElement('div');
+  overlay.id='addPreviewOverlay';overlay.className='addpreview';overlay.setAttribute('role','dialog');
+  overlay.setAttribute('aria-modal','true');overlay.setAttribute('aria-label','Announcement presentation preview');
+  var regs=(d.regions||[]).slice(),links=d.links||{};
+  var linkHtml=regs.map(function(r){
+    var url=links[r]||(regs.length===1?d.link:'');
+    return url&&/^https?:\/\//i.test(url)?'<a class="present__link present__link--region" href="'+esc(url)+'" target="_blank" rel="noopener">'+esc(r)+' ↗</a>':'';
+  }).join('');
+  var display={coverage_start:d.coverage_start,coverage_end:d.coverage_end,input_date:d.input_date};
+  overlay.innerHTML='<div class="addpreview__shell">'
+    +'<div class="addpreview__bar"><strong>Presentation preview</strong><span>Not published · Changes remain in the form</span><button type="button" class="btn btn--ghost" id="addPreviewClose">Close preview</button></div>'
+    +'<div class="addpreview__stage present"><div class="present__card">'
+    +'<div class="present__eyebrow"><span class="present__tag present__tag--platform">'+esc(d.platform)+'</span>'
+    +regs.map(function(r){return '<span class="present__tag">'+esc(r)+'</span>';}).join('')
+    +'<span class="present__tag">'+esc(coverageDisplay(display))+'</span></div>'
+    +'<h1 class="present__title">'+esc(d.title||'Untitled announcement')+'</h1>'
+    +(linkHtml?'<div class="present__links">'+linkHtml+'</div>':'')
+    +'<div class="present__content">'+renderBody(d.body||[],false)+'</div>'
+    +'</div></div></div>';
+  document.body.appendChild(overlay);
+  var close=function(){overlay.remove();document.removeEventListener('keydown',onKey);};
+  var onKey=function(e){if(e.key==='Escape'){e.preventDefault();e.stopImmediatePropagation();close();}};
+  overlay.querySelector('#addPreviewClose').addEventListener('click',close);
+  overlay.addEventListener('click',function(e){if(e.target===overlay)close();});
+  document.addEventListener('keydown',onKey,true);
+  overlay.querySelector('#addPreviewClose').focus();
+}
+
+function startNewEntry(){
+  if(state.nav==='add'&&!confirmDiscardAdd())return;
+  state.editDraft=blankDraft();markAddSaved();setNav('add');
+}
 function startDuplicateEntry(id){
+  if(state.nav==='add'&&!confirmDiscardAdd())return;
   var source=slides.find(function(s){return s.id===id;});if(!source)return;
   var draft=draftFromSlide(source);
   draft.id=null;draft.draftId=null;
@@ -3408,13 +3468,14 @@ function startDuplicateEntry(id){
   var current=coverageRangeForDay(todayIso());
   if(current){draft.coverage_start=current.start;draft.coverage_end=current.end;}
   draft.date='';draft.date_range='';
-  state.editDraft=draft;
+  state.editDraft=draft;markAddSaved();
   setNav('add');setStatus('Duplicated entry into a new unsaved form. Review the coverage, title, regions and links before publishing.',true);
 }
 function startEditEntry(id){
+  if(state.nav==='add'&&!confirmDiscardAdd())return;
   var s = slides.find(function(x){ return x.id === id; });
   if (!s) return;
-  state.editDraft = draftFromSlide(s);
+  state.editDraft = draftFromSlide(s);markAddSaved();
   setNav('add');
 }
 
@@ -3537,7 +3598,7 @@ function linkFieldHtml(d, editing){
 }
 
 function renderAddPane(wrap){
-  if (!state.editDraft) state.editDraft = blankDraft();
+  if (!state.editDraft){state.editDraft=blankDraft();markAddSaved();}
   var d = state.editDraft;
   var editing = !!d.id;
 
@@ -3665,6 +3726,7 @@ function renderAddPane(wrap){
       + '<div class="formactions">'
         + '<button type="button" class="btn" id="saveEntryBtn">'+(editing?'Save changes':'Add entry')+'</button>'
         + '<button type="button" class="btn btn--ghost" id="saveDraftBtn">Save as draft</button>'
+        + '<button type="button" class="btn btn--ghost" id="previewEntryBtn">Preview</button>'
         + (editing ? '<button type="button" class="btn btn--ghost" id="cancelEditBtn">Cancel edit</button>' : '')
         + '<div class="formactions__spacer"></div>'
         + '<button type="button" class="btn btn--ghost" id="clearFormBtn">Clear form</button>'
@@ -3936,13 +3998,18 @@ function wireAddPane(wrap){
     });
   });
 
+  // Preview uses the exact presentation content renderer, without publishing.
+  var previewBtn=wrap.querySelector('#previewEntryBtn');
+  if(previewBtn)previewBtn.addEventListener('click',showAddPreview);
+
   // Save draft without publishing to active slides.
   var draftBtn=wrap.querySelector('#saveDraftBtn');
   if(draftBtn)draftBtn.addEventListener('click',function(){saveSharedDraft(wrap);});
   wrap.querySelectorAll('[data-open-draft]').forEach(function(btn){btn.addEventListener('click',function(){
     var item=sharedDrafts.find(function(x){return x.draftId===btn.getAttribute('data-open-draft');});
     if(!item)return;
-    state.editDraft=draftFromSlide(item);state.editDraft.id=null;renderAddPane(wrap);
+    if(!confirmDiscardAdd())return;
+    state.editDraft=draftFromSlide(item);state.editDraft.id=null;markAddSaved();renderAddPane(wrap);
   });});
   wrap.querySelectorAll('[data-delete-draft]').forEach(function(btn){btn.addEventListener('click',function(){
     var id=btn.getAttribute('data-delete-draft');
@@ -3959,11 +4026,14 @@ function wireAddPane(wrap){
   if (saveBtn) saveBtn.addEventListener('click', function(){ saveEntry(wrap); });
 
   var cancelBtn = document.getElementById('cancelEditBtn');
-  if (cancelBtn) cancelBtn.addEventListener('click', function(){ state.editDraft = blankDraft(); renderAddPane(wrap); });
+  if (cancelBtn) cancelBtn.addEventListener('click', function(){
+    if(!confirmDiscardAdd())return;
+    state.editDraft=blankDraft();markAddSaved();renderAddPane(wrap);
+  });
 
   var clearBtn = document.getElementById('clearFormBtn');
   if (clearBtn) clearBtn.addEventListener('click', function(){
-    if (window.confirm('Clear the form? Unsaved input will be lost.')){ state.editDraft = blankDraft(); renderAddPane(wrap); }
+    if (window.confirm('Clear the form? Unsaved input will be lost.')){ state.editDraft = blankDraft();markAddSaved();renderAddPane(wrap); }
   });
 
   // edit / delete existing entries
@@ -4205,7 +4275,7 @@ function saveSharedDraft(wrap){
     remote.drafts=remoteDrafts.filter(function(x){return x.draftId!==id;}).concat([item]);
     return AUTH.push(remote).then(function(){sharedDrafts=remote.drafts;});
   }).then(function(){
-    state.editDraft.draftId=id;
+    state.editDraft.draftId=id;markAddSaved();
     setSyncStatus('Shared drafts saved ✓',true);
     setStatus('Draft saved for the team. It is not published.',true);
     renderAddPane(wrap);
@@ -4310,12 +4380,19 @@ function saveEntry(wrap){
   saveSlides();
   if(d.draftId){
     var publishedDraftId=d.draftId;
-    // Queue cleanup after the published entry has reached shared storage.
-    _syncPushChain.then(function(){return removeSharedDraft(publishedDraftId);}).catch(function(){
-      setStatus('Entry published, but the old draft could not be removed. You can delete it manually.',false);
+    // Do not remove a shared draft until the published entry is verified remotely.
+    var publishedEntryId=payload.id;
+    _syncPushChain.then(function(){return AUTH.pullData();}).then(function(remote){
+      if(!remote||!Array.isArray(remote.slides)||!remote.slides.some(function(x){return x.id===publishedEntryId;})){
+        throw new Error('Published entry not yet confirmed in shared storage');
+      }
+      return removeSharedDraft(publishedDraftId);
+    }).catch(function(err){
+      setStatus('Draft retained for safety: '+(err&&err.message||'publish verification failed')+'. Check shared sync before deleting it.',false);
     });
   }
   state.editDraft = blankDraft();     // reset for the next entry
+  markAddSaved();
   renderAddPane(wrap);
 }
 
@@ -5117,6 +5194,8 @@ function setNav(nav, opts){
   if (ADMIN_ONLY_NAVS[nav] && !(window.AUTH && AUTH.isAdmin())){
     nav = 'browse';
   }
+
+  if(state.nav==='add'&&nav!=='add'&&!opts.silent&&!confirmDiscardAdd())return;
 
   // "Present" is a modal overlay, not a persistent surface. Launch it over
   // whatever browse view is active, and don't change the underlying nav so
