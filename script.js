@@ -496,7 +496,7 @@ var state = {
   exportDateFilter: '__all__', // Export slides: which input date to include ('__all__' = every date)
   archiveGranularity: 'month', // Archive filter granularity: 'month' | 'quarter' | 'year'
   archivePeriodFilter: '__all__', // Archive: which period to show ('__all__' = every period)
-  present: { list: [], index: 0, dateFilter: '__all__' }  // presentation session: ordered slides + cursor + publish-date filter
+  present: { list: [], index: 0, dateFilter: '__all__', theme: 'dark', textSize: 'standard' }  // presentation session: ordered slides + cursor + publish-date filter
 };
 
 /* Group a list of slides by their publish date (the `date` field). Returns an
@@ -4125,6 +4125,19 @@ function populatePresentDates(){
   sel.value = state.present.dateFilter;
 }
 
+
+function applyPresentationDisplay(){
+  var overlay=document.getElementById('presentOverlay');
+  if(!overlay)return;
+  var p=state.present;
+  overlay.classList.toggle('present--light',p.theme==='light');
+  overlay.classList.remove('present--compact','present--large');
+  if(p.textSize==='compact'||p.textSize==='large')overlay.classList.add('present--'+p.textSize);
+  var theme=document.getElementById('presentTheme'),size=document.getElementById('presentTextSize');
+  if(theme)theme.value=p.theme;
+  if(size)size.value=p.textSize;
+}
+
 function openPresentation(){
   populatePresentDates();
   var list = buildPresentOrder();
@@ -4132,6 +4145,7 @@ function openPresentation(){
   state.present.index = 0;
   var ov = document.getElementById('presentOverlay');
   ov.hidden = false;
+  applyPresentationDisplay();
   document.body.style.overflow = 'hidden';
   renderPresent();
 }
@@ -4227,6 +4241,10 @@ function initPresentControls(){
   document.getElementById('presentPrev').addEventListener('click', function(){ presentGo(-1); });
   document.getElementById('presentNext').addEventListener('click', function(){ presentGo(1); });
   document.getElementById('presentClose').addEventListener('click', closePresentation);
+  var themeSel=document.getElementById('presentTheme'),sizeSel=document.getElementById('presentTextSize');
+  if(themeSel)themeSel.addEventListener('change',function(){state.present.theme=themeSel.value==='light'?'light':'dark';applyPresentationDisplay();});
+  if(sizeSel)sizeSel.addEventListener('change',function(){state.present.textSize=['compact','standard','large'].indexOf(sizeSel.value)>=0?sizeSel.value:'standard';applyPresentationDisplay();});
+
 
   var dateSel = document.getElementById('presentDateSelect');
   if (dateSel){
@@ -4240,6 +4258,7 @@ function initPresentControls(){
   document.addEventListener('keydown', function(e){
     var ov = document.getElementById('presentOverlay');
     if (!ov || ov.hidden) return;
+    if (e.target && /^(SELECT|INPUT|TEXTAREA|BUTTON)$/.test(e.target.tagName)) return;
     if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' '){ e.preventDefault(); presentGo(1); }
     else if (e.key === 'ArrowLeft' || e.key === 'PageUp'){ e.preventDefault(); presentGo(-1); }
     else if (e.key === 'Escape'){ closePresentation(); }
