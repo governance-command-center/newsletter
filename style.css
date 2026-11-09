@@ -1350,3 +1350,10 @@ input:not([type=checkbox]):not([type=radio]),select,textarea{border-radius:9px}
 
 /* Override the fullscreen presentation positioning inside the contained preview. */
 .addpreview .addpreview__stage.present{position:relative;inset:auto;z-index:auto;display:block;flex:1;min-height:0;background:linear-gradient(160deg,#0e2140,#132a4d 60%,#0b1b34);}
+
+/* Updates Library: compact filter, scan-friendly cards and result count */
+.library__coverage{width:100%;min-width:0;border:1px solid #d3deec;border-radius:8px;padding:9px 11px;background:#fff;color:#19344e;font:inherit;font-size:12px;}
+.library__results{font-size:12px;color:#65758b;margin:0 0 14px;font-weight:600;}
+.card__coverage{font-weight:600;}
+.card__excerpt{overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;}
+.card__full.is-open{overflow-wrap:anywhere;}

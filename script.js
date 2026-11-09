@@ -482,6 +482,7 @@ var state = {
   regions: new Set(),          // empty set = "all"
   dateFrom: '',
   dateTo: '',
+  libraryCoverage: '__all__',
   openCards: new Set(),
   sidebarOpen: false,          // mobile drawer
   importTab: 'pptx',           // 'pptx' | 'json'
@@ -954,8 +955,7 @@ function matchesFilters(s){
     var hit = regs.some(function(r){ return state.regions.has(r); });
     if (!hit) return false;
   }
-  if (state.dateFrom && s.date && s.date < state.dateFrom) return false;
-  if (state.dateTo && s.date && s.date > state.dateTo) return false;
+  if(state.libraryCoverage!=='__all__'&&coverageKey(s)!==state.libraryCoverage)return false;
   if (state.search){
     var q = state.search.toLowerCase();
     var hay = (s.title + ' ' + s.platform + ' ' + entryRegions(s).join(' ') + ' ' +
@@ -1016,7 +1016,8 @@ function renderFilterRail(){
     }).join('');
   }
 
-  var hasActiveFilters = state.platforms.size || state.regions.size || state.dateFrom || state.dateTo || state.search;
+  var hasActiveFilters = state.platforms.size || state.regions.size || state.libraryCoverage!=='__all__' || state.search;
+  var coverageGroups=entryCoverageGroups(all);
 
   rail.innerHTML =
     '<div class="filtergroup">'
@@ -1035,12 +1036,11 @@ function renderFilterRail(){
       + chipsHtml('region', ALLOWED_REGIONS, state.regions)
     + '</div>'
     + '<div class="filtergroup">'
-      + '<span class="filtergroup__label">Date</span>'
-      + '<div class="daterange">'
-        + '<input type="date" id="dateFrom" value="'+esc(state.dateFrom)+'" aria-label="From date">'
-        + '<span>to</span>'
-        + '<input type="date" id="dateTo" value="'+esc(state.dateTo)+'" aria-label="To date">'
-      + '</div>'
+      + '<label class="filtergroup__label" for="libraryCoverage">Coverage period</label>'
+      + '<select id="libraryCoverage" class="library__coverage" aria-label="Filter by coverage period">'
+      + '<option value="__all__">All coverage periods</option>'
+      + coverageGroups.map(function(g){return '<option value="'+esc(g.key)+'"'+(state.libraryCoverage===g.key?' selected':'')+'>'+esc(g.label)+' ('+g.count+')</option>';}).join('')
+      + '</select>'
       + (hasActiveFilters ? '<button type="button" class="filters__clear" id="clearFilters">Clear all filters</button>' : '')
     + '</div>';
 
@@ -1061,14 +1061,13 @@ function renderFilterRail(){
     });
   });
 
-  document.getElementById('dateFrom').addEventListener('change', function(e){ state.dateFrom = e.target.value; renderAll(); });
-  document.getElementById('dateTo').addEventListener('change', function(e){ state.dateTo = e.target.value; renderAll(); });
+  document.getElementById('libraryCoverage').addEventListener('change',function(e){state.libraryCoverage=e.target.value;renderAll();});
 
   var clearBtn = document.getElementById('clearFilters');
   if (clearBtn){
     clearBtn.addEventListener('click', function(){
       state.platforms.clear(); state.regions.clear();
-      state.dateFrom = ''; state.dateTo = ''; state.search = '';
+      state.dateFrom = ''; state.dateTo = ''; state.libraryCoverage='__all__'; state.search = '';
       document.getElementById('searchInput').value = '';
       renderAll();
     });
@@ -1245,6 +1244,8 @@ function renderCard(s){
   var regs = entryRegions(s);
   var links = entryLinks(s);
   var regionPills = regs.map(function(r){ return '<span class="pill">'+esc(r)+'</span>'; }).join('');
+  var excerpt=excerptOf(s)||'No text summary available. Open details to view this announcement.';
+  if(excerpt.length>220)excerpt=excerpt.slice(0,217).replace(/\s+\S*$/,'')+'…';
   // Link row: single "Read more" for one region; per-region links when several.
   var linkRow;
   if (regs.length > 1){
@@ -1264,13 +1265,13 @@ function renderCard(s){
         + '<div class="card__meta">'
           + '<span class="pill">'+esc(s.platform)+'</span>'
           + regionPills
-          + (s.date ? '<span class="pill">'+esc(fmtDate(s.date))+'</span>' : '')
+          + '<span class="pill card__coverage">'+esc(coverageDisplay(s))+'</span>'
         + '</div>'
         + authorLine(s)
-        + '<p class="card__excerpt">'+esc(excerptOf(s))+'</p>'
+        + '<p class="card__excerpt">'+esc(excerpt)+'</p>'
         + '<div class="card__row">'
           + linkRow
-          + '<button type="button" class="card__toggle" data-id="'+esc(s.id)+'">'+(isOpen ? 'Hide details' : 'View full update')+'</button>'
+          + '<button type="button" class="card__toggle" data-id="'+esc(s.id)+'" aria-expanded="'+(isOpen?'true':'false')+'">'+(isOpen ? 'Collapse details' : 'Expand details')+'</button>'
         + '</div>'
         + '<div class="card__full'+(isOpen ? ' is-open':'')+'">'+renderBody(s.body, false)+'</div>'
       + '</div>'
@@ -1286,12 +1287,12 @@ function renderMain(){
   var list = filteredSlides();
 
   if (!list.length){
-    app.innerHTML = '<div class="empty">No updates match the current filters.</div>';
+    app.innerHTML = '<div class="library__results">Showing 0 of '+slides.length+' announcements</div><div class="empty">No updates match the current filters.</div>';
     return;
   }
 
   var g = groupAndOrder(list);
-  var html = '';
+  var html = '<div class="library__results">Showing '+list.length+' of '+slides.length+' announcements</div>';
   g.order.forEach(function(k){
     var items = g.groups[k];
     html += '<section class="group">'
