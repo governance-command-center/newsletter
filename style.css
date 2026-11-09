@@ -1337,3 +1337,16 @@ input:not([type=checkbox]):not([type=radio]),select,textarea{border-radius:9px}
 .addphase__draftrow small{display:block;color:var(--muted);font-size:11px;margin-top:4px;}
 .addphase__draftrow>div:last-child{display:flex;gap:8px;flex-shrink:0;}
 @media(max-width:620px){.addphase__draftrow{align-items:flex-start;flex-direction:column;}.addphase__draftrow>div:last-child{width:100%;}}
+
+/* Add Update Phase 2B: presentation preview */
+.addpreview{position:fixed;inset:0;z-index:99999;background:rgba(7,20,38,.76);display:flex;align-items:center;justify-content:center;padding:24px;}
+.addpreview__shell{width:min(1100px,100%);height:min(92vh,900px);display:flex;flex-direction:column;overflow:hidden;border-radius:14px;background:#11253f;box-shadow:0 20px 75px rgba(0,0,0,.45);}
+.addpreview__bar{flex-shrink:0;display:flex;align-items:center;gap:16px;padding:14px 20px;background:#fff;color:#20364e;}
+.addpreview__bar strong{font-size:14px;}
+.addpreview__bar span{font-size:12px;color:#62768b;margin-right:auto;}
+.addpreview__stage{overflow-y:auto;flex:1;padding:35px 40px;}
+.addpreview__stage .present__card{margin:0 auto;}
+@media(max-width:640px){.addpreview{padding:8px;}.addpreview__bar{flex-wrap:wrap;gap:8px;padding:10px;}.addpreview__stage{padding:20px 14px;}}
+
+/* Override the fullscreen presentation positioning inside the contained preview. */
+.addpreview .addpreview__stage.present{position:relative;inset:auto;z-index:auto;display:block;flex:1;min-height:0;background:linear-gradient(160deg,#0e2140,#132a4d 60%,#0b1b34);}
