@@ -1327,3 +1327,5 @@ input:not([type=checkbox]):not([type=radio]),select,textarea{border-radius:9px}
 .addphase__error:empty{display:none;}
 .addphase__invalid{border-color:#b63830 !important;box-shadow:0 0 0 2px rgba(182,56,48,.09);}
 .addphase__errors:not([hidden]){padding:10px 12px;margin:10px 0;border-radius:8px;border:1px solid #e9b7b3;background:#fff4f2;color:#923129;font-size:12px;}
+
+#fCoverageStartWrap[hidden],#fCoverageEndWrap[hidden]{display:none !important;}
