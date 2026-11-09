@@ -94,7 +94,11 @@
         <span class="present__datepick-label">Input date</span>
         <select id="presentDateSelect" aria-label="Select input date to present"></select>
       </label>
-      <span class="present__counter" id="presentCounter"></span>
+      <div class="present__settings" role="group" aria-label="Presentation display settings">
+        <label class="present__setting"><span>Theme</span><select id="presentTheme" aria-label="Presentation theme"><option value="dark">Dark</option><option value="light">Light</option></select></label>
+        <label class="present__setting"><span>Text</span><select id="presentTextSize" aria-label="Presentation text size"><option value="compact">Compact</option><option value="standard" selected>Standard</option><option value="large">Large</option></select></label>
+      </div>
+      <span class="present__counter" id="presentCounter" aria-live="polite"></span>
       <button type="button" class="present__btn" id="presentPrev" aria-label="Previous">&#8592;</button>
       <button type="button" class="present__btn" id="presentNext" aria-label="Next">&#8594;</button>
       <button type="button" class="present__btn present__btn--close" id="presentClose" aria-label="Exit presentation">&#10005;</button>
