@@ -1995,7 +1995,7 @@ function exportJson(listArg, labelArg){
 // This is the "include the source" export: each entry's source URL is rendered
 // exactly as it is in the email ("Read more →"), so the file is a self-contained,
 // forwardable copy of the briefing.
-function exportEmailHtml(listArg, labelArg){
+async function exportEmailHtml(listArg, labelArg){
   var scope = currentExportScope();
   var list = listArg || (scope === 'filtered' ? filteredSlides() : slides);
   if (!listArg) list = slidesByInputDate(list, state.exportDateFilter);
@@ -2005,7 +2005,7 @@ function exportEmailHtml(listArg, labelArg){
   var criticalList = pickCriticalUpdates(list);           // all, ranked by urgency
   var periodLabel = reportingPeriodLabel(list);
 
-  var html = buildExecEmailHtml(list, criticalList, { periodLabel: periodLabel, baseUrl: baseUrl, thumbs: {} });
+  var html = buildApprovedNewsletterHtml(list, { periodLabel: periodCoveredLabel(list), thumbs: await newsletterPrepareImages(list) });
 
   var stamp = new Date().toISOString().slice(0,10);
   var slug = (labelArg ? labelArg.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'') : scope) || 'export';
@@ -2063,7 +2063,7 @@ function exportPdf(listArg, labelArg){
   var jsPDFCtor = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
   if (jsPDFCtor){
     try {
-      exportPdfVector(list, labelArg, jsPDFCtor);
+      exportApprovedPdfVector(list, labelArg, jsPDFCtor);
       return;
     } catch (e){
       setStatus('Vector PDF failed ('+(e && e.message ? e.message : 'error')+') — falling back to the print dialog.', false);
@@ -2077,6 +2077,113 @@ function exportPdf(listArg, labelArg){
    Lays the content out by hand so every URL becomes a true PDF link annotation
    (doc.link / textWithLink), which stays clickable in every PDF viewer. Rich
    HTML is walked into styled text runs; tables and images are drawn directly. */
+
+/* Approved five-page October newsletter styling, applied to live data.
+   Each unique update is numbered once; no raw slide metadata is published. */
+function exportApprovedPdfVector(list,labelArg,jsPDFCtor){
+  var doc=new jsPDFCtor({unit:'pt',format:'a4',compress:true});
+  var PW=doc.internal.pageSize.getWidth(),PH=doc.internal.pageSize.getHeight(),M=48,CW=PW-2*M,y=35,number=0;
+  var navy=[18,42,65],teal=[8,130,151],gray=[78,96,113];
+  function next(height){if(y+height>PH-42){doc.addPage();y=43;}}
+  function font(size,bold,color){
+    doc.setFont('helvetica',bold?'bold':'normal');doc.setFontSize(size);
+    var c=color||navy;doc.setTextColor(c[0],c[1],c[2]);
+  }
+  function safe(t){return String(t||'').replace(/[\u2010-\u2015]/g,'-').replace(/\u2022/g,'-').replace(/\s+/g,' ').trim();}
+  function lines(t,size,weight){font(size,!!weight,gray);return doc.splitTextToSize(safe(t),CW);}
+  function drawText(t,size,weight,color,leading){
+    var ll=lines(t,size,weight),step=leading||size*1.55;
+    ll.forEach(function(line){next(step+3);font(size,weight,color);doc.text(line,M,y+size);y+=step;});
+  }
+  function rule(){next(10);doc.setDrawColor(225,231,236);doc.setLineWidth(.7);doc.line(M,y+4,PW-M,y+4);y+=11;}
+  function pdfImage(url){
+    try {
+      var pr=doc.getImageProperties(url);
+      if(!pr || !pr.width || !pr.height)return;
+      var w=Math.min(CW-18,pr.width),h=w*pr.height/pr.width,maxH=330;
+      if(h>maxH){w=w*maxH/h;h=maxH;}
+      next(h+16);
+      doc.addImage(url,pr.fileType||'PNG',(PW-w)/2,y+7,w,h);
+      y+=h+17;
+    }catch(e){ /* preserve other content when an image is unsupported */ }
+  }
+  function sourceLabel(url,label){
+    if(!url)return;
+    next(17);font(9,false,teal);
+    doc.textWithLink(label||'Official source',M,y+10,{url:url});
+    y+=22;
+  }
+
+  font(22,true,navy);doc.text('Merchandising Newsletter',PW/2,y+24,{align:'center'});y+=46;
+  var period=periodCoveredLabel(list);
+  font(10,false,gray);doc.text('Marketplace updates for '+safe(period),PW/2,y+10,{align:'center'});y+=44;
+  var groups=newsletterGroupByPlatform(list);
+  var regionSort=ALLOWED_REGIONS.concat(['Regional']);
+  groups.platforms.forEach(function(platform){
+    var rm=groups.groups[platform],regs=Object.keys(rm);
+    regs.sort(function(a,b){
+      var ia=regionSort.indexOf(a),ib=regionSort.indexOf(b);
+      return (ia<0?998:ia)-(ib<0?998:ib);
+    });
+    next(58);drawText(platform==='Tiktok'?'TikTok':platform,16,true,navy,23);y+=5;
+    regs.forEach(function(region){
+      next(42);drawText(newsletterRegionCode(region),11,true,teal,20);y+=2;
+      rm[region].forEach(function(s){
+        next(43);
+        number++;
+        drawText(String(number).padStart(2,'0')+'. '+(s.title||'Untitled update'),11,true,navy,17);
+        var summary=newsletterPlainBody(s);
+        if(summary){y+=3;drawText(summary,9.7,false,gray,14.8);}
+        var links=newsletterAllLinks(s);
+        if(links.length){
+          y+=4;links.forEach(function(link){
+            sourceLabel(link.url,links.length>1?newsletterRegionCode(link.region)+' — Official source':'Official source');
+          });
+        }else{
+          newsletterImageBlocks(s).forEach(function(img){pdfImage(img.dataUrl);});
+          y+=5;
+        }
+        rule();
+      });
+    });
+    y+=8;
+  });
+  var stamp=new Date().toISOString().slice(0,10);
+  var slug=(labelArg||stamp).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+  doc.save('Merchandising_Newsletter_'+slug+'.pdf');
+  setStatus('Exported approved-format Merchandising Newsletter PDF with '+list.length+' unique updates.',true);
+}
+function buildApprovedPrintDoc(list){
+  var period=periodCoveredLabel(list),group=newsletterGroupByPlatform(list),idx=0,regOrder=ALLOWED_REGIONS.concat(['Regional']);
+  var h='<div class="pdf-doc" style="max-width:780px;margin:auto;padding:10px 25px;color:#122b49;font-family:Arial,Helvetica,sans-serif;background:white">'
+    +'<h1 style="text-align:center;font-size:24px;margin:14px 0 18px">Merchandising Newsletter</h1>'
+    +'<p style="text-align:center;font-size:11px;color:#526c80;margin:0 0 48px">Marketplace updates for '+esc(period)+'</p>';
+  group.platforms.forEach(function(platform){
+    h+='<h2 style="font-size:19px;color:#122b49;margin:28px 0 20px;page-break-after:avoid">'+esc(platform==='Tiktok'?'TikTok':platform)+'</h2>';
+    var rs=Object.keys(group.groups[platform]);rs.sort(function(a,b){
+      var x=regOrder.indexOf(a),y=regOrder.indexOf(b);return (x<0?998:x)-(y<0?998:y);
+    });
+    rs.forEach(function(reg){
+      h+='<h3 style="font-size:13px;color:#087d95;margin:21px 0 10px;page-break-after:avoid">'+esc(newsletterRegionCode(reg))+'</h3>';
+      group.groups[platform][reg].forEach(function(s){
+        idx++;
+        h+='<div style="page-break-inside:avoid;border-bottom:1px solid #e5ecf1;padding:9px 0 13px">'
+          +'<div style="font-weight:bold;font-size:12px;margin-bottom:8px">'+String(idx).padStart(2,'0')+'. '+esc(s.title)+'</div>'
+          +'<div style="font-size:11px;line-height:1.55;color:#4c6175">'+esc(newsletterPlainBody(s))+'</div>';
+        var links=newsletterAllLinks(s);
+        if(links.length){links.forEach(function(link){
+          h+='<div style="margin-top:10px"><a style="font-size:10px;color:#008aa4;text-decoration:none" href="'+esc(link.url)+'">'
+            +(links.length>1?esc(newsletterRegionCode(link.region))+' — ':'')+'Official source</a></div>';
+        });}else{newsletterImageBlocks(s).forEach(function(im){
+          h+='<div style="text-align:center;margin:13px 0"><img style="display:block;margin:auto;max-width:90%;height:auto" src="'+im.dataUrl+'"></div>';
+        });}
+        h+='</div>';
+      });
+    });
+  });
+  return h+'</div>';
+}
+
 function exportPdfVector(list, labelArg, jsPDFCtor){
   var doc = new jsPDFCtor({ unit:'pt', format:'a4', compress:true });
   var PAGE_W = doc.internal.pageSize.getWidth();
@@ -2368,7 +2475,7 @@ function exportPdfVector(list, labelArg, jsPDFCtor){
 
 function exportPdfPrint(list, labelArg){
   var printArea = document.getElementById('printArea');
-  printArea.innerHTML = buildPrintDoc(list, labelArg);
+  printArea.innerHTML = buildApprovedPrintDoc(list);
 
   var imgs = Array.prototype.slice.call(printArea.querySelectorAll('img'));
   if (!imgs.length){
@@ -2846,6 +2953,132 @@ function emailLinkRow(s){
     : '';
 }
 
+
+/* ============================================================
+   APPROVED MERCHANDISING NEWSLETTER — email (12–30 Oct reference)
+   Platform > region, Outlook-safe table markup, links OR images.
+   ============================================================ */
+function newsletterRegionCode(region){
+  var map={Malaysia:'MY',Philippines:'PH',Singapore:'SG',Thailand:'TH',Vietnam:'VN',Indonesia:'ID'};
+  return map[region] || (region === 'Regional' ? 'Regional' : String(region||'Regional').toUpperCase());
+}
+function newsletterGroupByPlatform(list){
+  var order=ALLOWED_PLATFORMS.concat(['Lazada','Shopee','Tiktok','TikTok','Zalora','Others'])
+    .filter(function(p,i,a){return a.indexOf(p)===i;});
+  var map={}, groupOrder=[];
+  list.forEach(function(s){
+    var p=s.platform||'Others';
+    if(!map[p]){map[p]={};groupOrder.push(p);}
+    var regs=entryRegions(s);
+    // A multi-market topic stays one topic, under Regional, not duplicated.
+    var reg=regs.length===1?regs[0]:'Regional';
+    if(!map[p][reg]) map[p][reg]=[];
+    map[p][reg].push(s);
+  });
+  groupOrder.sort(function(a,b){var aa=order.indexOf(a),bb=order.indexOf(b);return (aa<0?999:aa)-(bb<0?999:bb);});
+  return {platforms:groupOrder,groups:map};
+}
+function newsletterAllLinks(s){
+  var links=entryLinks(s), regs=entryRegions(s), out=[];
+  regs.forEach(function(reg){
+    var url=links[reg];
+    if(url && !out.some(function(x){return x.url===url;})) out.push({region:reg,url:url});
+  });
+  if(!out.length && s.link)out.push({region:'',url:s.link});
+  return out;
+}
+function newsletterPlainBody(s){
+  return (s.body||[]).map(function(b){
+    if(b.type==='rich')return richToText(b.html||'');
+    if(b.type==='table' && b.rows)return b.rows.map(function(r){return r.join(' | ');}).join(' ');
+    return b.text||'';
+  }).filter(Boolean).join(' ').replace(/\s+/g,' ').trim();
+}
+function newsletterEmailSummary(s){
+  // Keep a natural complete first sentence (as in the approved October sample).
+  var summary=shortExcerpt(s,340);
+  return summary || newsletterPlainBody(s).slice(0,400);
+}
+function newsletterImageBlocks(s){
+  return (s.body||[]).filter(function(b){return b.type==='image' && b.dataUrl;});
+}
+async function newsletterPrepareImages(list){
+  var out={};
+  await Promise.all(list.map(async function(s){
+    if(newsletterAllLinks(s).length)return; // official source always wins
+    var images=newsletterImageBlocks(s);
+    if(!images.length)return;
+    out[s.id]=await Promise.all(images.map(function(b){
+      return makeThumbnailDataUrl(b.dataUrl,780);
+    }));
+  }));
+  return out;
+}
+function buildApprovedNewsletterHtml(list,opts){
+  opts=opts||{};
+  var period=opts.periodLabel||periodCoveredLabel(list);
+  var thumbs=opts.thumbs||{};
+  var groups=newsletterGroupByPlatform(list);
+  var total=list.length, platformCount=groups.platforms.length;
+  var h='<!doctype html><html xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word">'
+    +'<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+    +'<!--[if mso]><xml><o:OfficeDocumentSettings><o:AllowPNG/><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml><![endif]-->'
+    +'<title>Merchandising Newsletter | '+esc(period)+'</title></head>'
+    +'<body style="margin:0;padding:0;background:#edf2f7;font-family:Arial,Helvetica,sans-serif;color:#172a42">'
+    +'<table cellpadding="0" cellspacing="0" role="presentation" width="100%" style="background:#edf2f7"><tr><td align="center" style="padding:22px 12px">'
+    +'<table cellpadding="0" cellspacing="0" role="presentation" width="760" style="max-width:760px;width:100%;background:#ffffff">'
+    +'<tr><td bgcolor="#0c213d" style="background:#0c213d;padding:40px 38px 36px;border-top:5px solid #25c3d7">'
+    +'<div style="font-size:11px;font-weight:700;letter-spacing:2px;color:#64d9e9">SYNAGIE &nbsp;/&nbsp; MERCHANDISING INTELLIGENCE</div>'
+    +'<div style="font-size:30px;line-height:1.2;color:#ffffff;font-weight:700;margin:18px 0 14px">Marketplace updates,<br>made easy to scan.</div>'
+    +'<div style="font-size:15px;color:#c5d8e8">'+esc(period)+' &nbsp;&middot;&nbsp; Regional marketplace digest</div></td></tr>'
+    +'<tr><td bgcolor="#eaf8fc" style="padding:22px 38px;background:#eaf8fc;border-bottom:1px solid #d9edf4">'
+    +'<div style="font-size:11px;color:#39788a;font-weight:bold;letter-spacing:1.5px;margin-bottom:8px">AT A GLANCE</div>'
+    +'<div style="font-size:16px;color:#102d4c;font-weight:bold">'+platformCount+' platform'+(platformCount===1?'':'s')+' &nbsp;&middot;&nbsp; '+total+' update'+(total===1?'':'s')+' &nbsp;&middot;&nbsp; Regional coverage</div>'
+    +'<div style="font-size:13px;color:#536a7e;margin-top:8px;line-height:1.6">Seller policies, operational changes, new tools and upcoming campaigns.</div></td></tr>'
+    +'<tr><td style="padding:28px 38px 6px"><p style="font-size:14px;line-height:1.7;margin:0 0 12px">Hi team,</p>'
+    +'<p style="font-size:14px;line-height:1.7;margin:0">Here are the latest marketplace announcements and key actions relevant to our regional accounts. Browse by platform and region, with official references where available.</p></td></tr>';
+  groups.platforms.forEach(function(platform,pi){
+    var regMap=groups.groups[platform], regs=Object.keys(regMap);
+    var regOrder=ALLOWED_REGIONS.concat(['Regional']);
+    regs.sort(function(a,b){var aa=regOrder.indexOf(a),bb=regOrder.indexOf(b);return (aa<0?998:aa)-(bb<0?998:bb);});
+    var count=regs.reduce(function(n,k){return n+regMap[k].length;},0);
+    h+='<tr><td style="padding:30px 38px 0"><table cellpadding="0" cellspacing="0" role="presentation" width="100%"><tr>'
+      +'<td bgcolor="#102c4d" style="background:#102c4d;border-left:5px solid #ed6a32;padding:18px 20px">'
+      +'<div style="font-size:11px;color:#a8c5d8;letter-spacing:1.6px">PLATFORM '+String(pi+1).padStart(2,'0')+'</div>'
+      +'<div style="font-size:23px;font-weight:bold;color:#ffffff;margin-top:4px">'+esc(platform==='Tiktok'?'TikTok':platform)+'</div></td>'
+      +'<td align="right" bgcolor="#102c4d" style="background:#102c4d;padding:18px 20px;color:#b5cbd9;font-size:12px">'+count+' update'+(count===1?'':'s')+'</td>'
+      +'</tr></table></td></tr>';
+    regs.forEach(function(reg){
+      var items=regMap[reg];
+      h+='<tr><td style="padding:20px 38px 0"><div style="font-size:11px;font-weight:bold;letter-spacing:1.7px;color:#087b94;border-bottom:1px solid #dce7ee;padding:0 0 10px">'
+        +esc(newsletterRegionCode(reg))+' <span style="font-weight:normal;color:#8194a4;letter-spacing:0">&nbsp; / &nbsp; '+items.length+' update'+(items.length===1?'':'s')+'</span></div></td></tr>';
+      items.forEach(function(s,i){
+        var links=newsletterAllLinks(s);
+        var linkHtml=links.map(function(x){
+          return '<a href="'+esc(x.url)+'" style="color:#008aa4;font-size:12px;font-weight:bold;text-decoration:none">'
+            +(links.length>1?esc(newsletterRegionCode(x.region))+' — ':'')+'Official source &#8250;</a>';
+        }).join(' &nbsp; ');
+        var imageHtml='';
+        if(!links.length && thumbs[s.id]){
+          (thumbs[s.id]||[]).forEach(function(src){
+            if(!src)return;
+            imageHtml+='<table role="presentation" align="center" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;margin:14px auto 8px"><tr><td align="center" style="text-align:center;padding:8px 0">'
+              +'<img align="center" alt="Marketplace announcement graphic" src="'+src+'" width="620" style="display:block;margin:0 auto;max-width:100%;width:auto;height:auto;border:0"></td></tr></table>';
+          });
+        }
+        h+='<tr><td style="padding:16px 38px 0"><table cellpadding="0" cellspacing="0" role="presentation" width="100%" style="border-bottom:1px solid #e5ecf1"><tr>'
+          +'<td valign="top" width="34" style="padding:2px 10px 18px 0"><div style="background:#eaf8fc;color:#087d95;font-weight:bold;font-size:12px;text-align:center;padding:8px 0;border-radius:5px">'+String(i+1).padStart(2,'0')+'</div></td>'
+          +'<td style="padding:0 0 19px"><div style="font-size:15px;font-weight:bold;line-height:1.5;color:#122b49">'+esc(s.title||'Untitled update')+'</div>'
+          +'<div style="font-size:13px;line-height:1.7;color:#4c6175;margin-top:6px">'+esc(newsletterEmailSummary(s))+'</div>'
+          +(linkHtml?'<div style="margin-top:12px">'+linkHtml+'</div>':'')
+          +imageHtml+'</td></tr></table></td></tr>';
+      });
+    });
+  });
+  h+='<tr><td style="height:30px">&nbsp;</td></tr></table></td></tr></table></body></html>';
+  return h;
+}
+
 function buildExecEmailHtml(list, criticalList, opts){
 
   opts = opts || {};
@@ -2979,7 +3212,7 @@ function emailBodyFragment(fullHtml){
   // the centring padding. Nested inside the compose window's OWN table they
   // collapse and squeeze the content, so we hand the client the inner card table
   // directly.
-  var card = /<table role="presentation" width="640"[\s\S]*<\/table>/i.exec(inner);
+  var card = /<table[^>]*role="presentation"[^>]*width="760"[\s\S]*<\/table>/i.exec(inner);
   if (!card) return inner;
 
   var html = card[0];
@@ -2993,8 +3226,8 @@ function emailBodyFragment(fullHtml){
   //   1. width="640" as an HTML attribute. Outlook renders through Word, which
   //      honours the attribute over CSS, so this alone keeps it at 640.
   //   2. max-width:640px in the inline style, which caps it even at width:100%.
-  html = html.replace(/(<table role="presentation")\s+width="640"/i, '$1 width="100%"');
-  html = html.replace(/max-width:640px;\s*/i, '');
+  html = html.replace(/(<table[^>]*role="presentation"[^>]*)width="760"/i, '$1width="100%"');
+  html = html.replace(/max-width:760px;\s*/i, '');
   html = html.replace(/(<table role="presentation" width="100%"[^>]*style=")/i, '$1width:100%;');
 
   return html;
@@ -3061,7 +3294,7 @@ function renderExecPreview(){
         + '<span class="emailpreview__label">Email preview</span>'
         + '<button type="button" class="btn copybtn" id="execCopyBtn"><span class="copybtn__toast">Copied — paste into your email</span>Copy for email</button>'
       + '</div>'
-      + '<iframe id="execPreviewFrame" title="Executive email preview"></iframe>'
+      + '<iframe id="execPreviewFrame" title="Merchandising newsletter preview"></iframe>'
     + '</div>';
 
   document.getElementById('execPreviewFrame').srcdoc = state.execHtml;
@@ -3098,9 +3331,9 @@ async function generateExecEmail(){
   var periodLabel = reportingPeriodLabel(list);
 
   // Badges are lettered platform codes, so no image processing is needed.
-  state.execHtml = buildExecEmailHtml(list, criticalList, { periodLabel: periodLabel, baseUrl: baseUrl, thumbs: {} });
+  state.execHtml = buildApprovedNewsletterHtml(list, { periodLabel: periodCoveredLabel(list), thumbs: await newsletterPrepareImages(list) });
   renderExecPreview();
-  setStatus('Generated the executive email — all ' + list.length + ' update' + (list.length === 1 ? '' : 's') + ' included, ordered by urgency, each with its platform badge (' + platformCode('Lazada') + ', ' + platformCode('Shopee') + ', ' + platformCode('Tiktok') + ', ' + platformCode('Zalora') + ').', true);
+  setStatus('Generated the approved merchandising newsletter — all ' + list.length + ' update' + (list.length === 1 ? '' : 's') + ' included, grouped by platform and region (' + platformCode('Lazada') + ', ' + platformCode('Shopee') + ', ' + platformCode('Tiktok') + ', ' + platformCode('Zalora') + ').', true);
 }
 
 /* ============================================================
@@ -4422,7 +4655,7 @@ function renderExportPane(wrap){
   wrap.innerHTML =
     '<div class="panel">'
       + '<div class="panel__head"><h2 class="panel__title">Export slides</h2></div>'
-      + '<p class="panel__hint">Exports respect the Platform / Region / Date / Search filters set on the browse view. <strong>Export as PDF</strong> builds a real PDF where every link — the source links and any links inside the details — is clickable in any PDF reader. <strong>Export as Email</strong> produces the same styled briefing as the Generate email tab — reporting period, summary, per-platform counts, and every update with its platform badge and source link — as a self-contained <code>.html</code> file you can open, forward, or paste into your inbox.</p>'
+      + '<p class="panel__hint">Exports respect the Library filters and selected input date. PDF and Email (HTML) follow our approved Merchandising Newsletter layouts: platform-first and region-second, with source hyperlinks and images only for updates without an official source. PDF includes full topic descriptions; email provides readable summaries.</p>'
       + '<div class="scopepick">'
         + '<label><input type="radio" name="exportScope" value="filtered" checked> Current filtered view ('+filteredSlides().length+')</label>'
         + '<label><input type="radio" name="exportScope" value="all"> All slides ('+slides.length+')</label>'
@@ -4590,7 +4823,7 @@ function renderEmailPane(wrap){
   wrap.innerHTML =
     '<div class="panel">'
       + '<div class="panel__head"><h2 class="panel__title">Generate email</h2></div>'
-      + '<p class="panel__hint">A short, leadership-facing briefing: reporting period, an auto-generated summary, per-platform counts and the top updates that need attention — each tagged with its platform-coloured badge (LZD in blue, SHP in orange, TTS in black, ZLR in purple). Set a base URL to make the "Open Interactive Newsletter" button clickable. When you hit <strong>Copy for email</strong>, the styled briefing — links live — is placed on your clipboard so it pastes into Gmail or Outlook exactly as previewed.</p>'
+      + '<p class="panel__hint">Generate the approved merchandising newsletter: platform-first, region-second, with the October newsletter header, full topic coverage, official source links, and supporting images only where no source link is available. Copy the styled HTML into Outlook or download it from Export &amp; PDF.</p>'
       + '<div class="scopepick">'
         + '<label><input type="radio" name="execScope" value="filtered" checked> Current filtered view ('+filteredSlides().length+')</label>'
         + '<label><input type="radio" name="execScope" value="all"> All slides ('+slides.length+')</label>'
