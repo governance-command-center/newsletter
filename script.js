@@ -2063,7 +2063,7 @@ function exportPdf(listArg, labelArg){
   var jsPDFCtor = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
   if (jsPDFCtor){
     try {
-      exportPdfVector(list, labelArg, jsPDFCtor);
+      exportApprovedPdfVector(list, labelArg, jsPDFCtor);
       return;
     } catch (e){
       setStatus('Vector PDF failed ('+(e && e.message ? e.message : 'error')+') — falling back to the print dialog.', false);
@@ -2077,6 +2077,113 @@ function exportPdf(listArg, labelArg){
    Lays the content out by hand so every URL becomes a true PDF link annotation
    (doc.link / textWithLink), which stays clickable in every PDF viewer. Rich
    HTML is walked into styled text runs; tables and images are drawn directly. */
+
+/* Approved five-page October newsletter styling, applied to live data.
+   Each unique update is numbered once; no raw slide metadata is published. */
+function exportApprovedPdfVector(list,labelArg,jsPDFCtor){
+  var doc=new jsPDFCtor({unit:'pt',format:'a4',compress:true});
+  var PW=doc.internal.pageSize.getWidth(),PH=doc.internal.pageSize.getHeight(),M=48,CW=PW-2*M,y=35,number=0;
+  var navy=[18,42,65],teal=[8,130,151],gray=[78,96,113];
+  function next(height){if(y+height>PH-42){doc.addPage();y=43;}}
+  function font(size,bold,color){
+    doc.setFont('helvetica',bold?'bold':'normal');doc.setFontSize(size);
+    var c=color||navy;doc.setTextColor(c[0],c[1],c[2]);
+  }
+  function safe(t){return String(t||'').replace(/[\u2010-\u2015]/g,'-').replace(/\u2022/g,'-').replace(/\s+/g,' ').trim();}
+  function lines(t,size,weight){font(size,!!weight,gray);return doc.splitTextToSize(safe(t),CW);}
+  function drawText(t,size,weight,color,leading){
+    var ll=lines(t,size,weight),step=leading||size*1.55;
+    ll.forEach(function(line){next(step+3);font(size,weight,color);doc.text(line,M,y+size);y+=step;});
+  }
+  function rule(){next(10);doc.setDrawColor(225,231,236);doc.setLineWidth(.7);doc.line(M,y+4,PW-M,y+4);y+=11;}
+  function pdfImage(url){
+    try {
+      var pr=doc.getImageProperties(url);
+      if(!pr || !pr.width || !pr.height)return;
+      var w=Math.min(CW-18,pr.width),h=w*pr.height/pr.width,maxH=330;
+      if(h>maxH){w=w*maxH/h;h=maxH;}
+      next(h+16);
+      doc.addImage(url,pr.fileType||'PNG',(PW-w)/2,y+7,w,h);
+      y+=h+17;
+    }catch(e){ /* preserve other content when an image is unsupported */ }
+  }
+  function sourceLabel(url,label){
+    if(!url)return;
+    next(17);font(9,false,teal);
+    doc.textWithLink(label||'Official source',M,y+10,{url:url});
+    y+=22;
+  }
+
+  font(22,true,navy);doc.text('Merchandising Newsletter',PW/2,y+24,{align:'center'});y+=46;
+  var period=periodCoveredLabel(list);
+  font(10,false,gray);doc.text('Marketplace updates for '+safe(period),PW/2,y+10,{align:'center'});y+=44;
+  var groups=newsletterGroupByPlatform(list);
+  var regionSort=ALLOWED_REGIONS.concat(['Regional']);
+  groups.platforms.forEach(function(platform){
+    var rm=groups.groups[platform],regs=Object.keys(rm);
+    regs.sort(function(a,b){
+      var ia=regionSort.indexOf(a),ib=regionSort.indexOf(b);
+      return (ia<0?998:ia)-(ib<0?998:ib);
+    });
+    next(58);drawText(platform==='Tiktok'?'TikTok':platform,16,true,navy,23);y+=5;
+    regs.forEach(function(region){
+      next(42);drawText(newsletterRegionCode(region),11,true,teal,20);y+=2;
+      rm[region].forEach(function(s){
+        next(43);
+        number++;
+        drawText(String(number).padStart(2,'0')+'. '+(s.title||'Untitled update'),11,true,navy,17);
+        var summary=newsletterPlainBody(s);
+        if(summary){y+=3;drawText(summary,9.7,false,gray,14.8);}
+        var links=newsletterAllLinks(s);
+        if(links.length){
+          y+=4;links.forEach(function(link){
+            sourceLabel(link.url,links.length>1?newsletterRegionCode(link.region)+' — Official source':'Official source');
+          });
+        }else{
+          newsletterImageBlocks(s).forEach(function(img){pdfImage(img.dataUrl);});
+          y+=5;
+        }
+        rule();
+      });
+    });
+    y+=8;
+  });
+  var stamp=new Date().toISOString().slice(0,10);
+  var slug=(labelArg||stamp).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+  doc.save('Merchandising_Newsletter_'+slug+'.pdf');
+  setStatus('Exported approved-format Merchandising Newsletter PDF with '+list.length+' unique updates.',true);
+}
+function buildApprovedPrintDoc(list){
+  var period=periodCoveredLabel(list),group=newsletterGroupByPlatform(list),idx=0,regOrder=ALLOWED_REGIONS.concat(['Regional']);
+  var h='<div class="pdf-doc" style="max-width:780px;margin:auto;padding:10px 25px;color:#122b49;font-family:Arial,Helvetica,sans-serif;background:white">'
+    +'<h1 style="text-align:center;font-size:24px;margin:14px 0 18px">Merchandising Newsletter</h1>'
+    +'<p style="text-align:center;font-size:11px;color:#526c80;margin:0 0 48px">Marketplace updates for '+esc(period)+'</p>';
+  group.platforms.forEach(function(platform){
+    h+='<h2 style="font-size:19px;color:#122b49;margin:28px 0 20px;page-break-after:avoid">'+esc(platform==='Tiktok'?'TikTok':platform)+'</h2>';
+    var rs=Object.keys(group.groups[platform]);rs.sort(function(a,b){
+      var x=regOrder.indexOf(a),y=regOrder.indexOf(b);return (x<0?998:x)-(y<0?998:y);
+    });
+    rs.forEach(function(reg){
+      h+='<h3 style="font-size:13px;color:#087d95;margin:21px 0 10px;page-break-after:avoid">'+esc(newsletterRegionCode(reg))+'</h3>';
+      group.groups[platform][reg].forEach(function(s){
+        idx++;
+        h+='<div style="page-break-inside:avoid;border-bottom:1px solid #e5ecf1;padding:9px 0 13px">'
+          +'<div style="font-weight:bold;font-size:12px;margin-bottom:8px">'+String(idx).padStart(2,'0')+'. '+esc(s.title)+'</div>'
+          +'<div style="font-size:11px;line-height:1.55;color:#4c6175">'+esc(newsletterPlainBody(s))+'</div>';
+        var links=newsletterAllLinks(s);
+        if(links.length){links.forEach(function(link){
+          h+='<div style="margin-top:10px"><a style="font-size:10px;color:#008aa4;text-decoration:none" href="'+esc(link.url)+'">'
+            +(links.length>1?esc(newsletterRegionCode(link.region))+' — ':'')+'Official source</a></div>';
+        });}else{newsletterImageBlocks(s).forEach(function(im){
+          h+='<div style="text-align:center;margin:13px 0"><img style="display:block;margin:auto;max-width:90%;height:auto" src="'+im.dataUrl+'"></div>';
+        });}
+        h+='</div>';
+      });
+    });
+  });
+  return h+'</div>';
+}
+
 function exportPdfVector(list, labelArg, jsPDFCtor){
   var doc = new jsPDFCtor({ unit:'pt', format:'a4', compress:true });
   var PAGE_W = doc.internal.pageSize.getWidth();
@@ -2368,7 +2475,7 @@ function exportPdfVector(list, labelArg, jsPDFCtor){
 
 function exportPdfPrint(list, labelArg){
   var printArea = document.getElementById('printArea');
-  printArea.innerHTML = buildPrintDoc(list, labelArg);
+  printArea.innerHTML = buildApprovedPrintDoc(list);
 
   var imgs = Array.prototype.slice.call(printArea.querySelectorAll('img'));
   if (!imgs.length){
@@ -4548,7 +4655,7 @@ function renderExportPane(wrap){
   wrap.innerHTML =
     '<div class="panel">'
       + '<div class="panel__head"><h2 class="panel__title">Export slides</h2></div>'
-      + '<p class="panel__hint">Exports respect the Platform / Region / Date / Search filters set on the browse view. <strong>Export as PDF</strong> builds a real PDF where every link — the source links and any links inside the details — is clickable in any PDF reader. <strong>Export as Email</strong> produces the same styled briefing as the Generate email tab — reporting period, summary, per-platform counts, and every update with its platform badge and source link — as a self-contained <code>.html</code> file you can open, forward, or paste into your inbox.</p>'
+      + '<p class="panel__hint">Exports respect the Library filters and selected input date. PDF and Email (HTML) follow our approved Merchandising Newsletter layouts: platform-first and region-second, with source hyperlinks and images only for updates without an official source. PDF includes full topic descriptions; email provides readable summaries.</p>'
       + '<div class="scopepick">'
         + '<label><input type="radio" name="exportScope" value="filtered" checked> Current filtered view ('+filteredSlides().length+')</label>'
         + '<label><input type="radio" name="exportScope" value="all"> All slides ('+slides.length+')</label>'
@@ -4716,7 +4823,7 @@ function renderEmailPane(wrap){
   wrap.innerHTML =
     '<div class="panel">'
       + '<div class="panel__head"><h2 class="panel__title">Generate email</h2></div>'
-      + '<p class="panel__hint">A short, leadership-facing briefing: reporting period, an auto-generated summary, per-platform counts and the top updates that need attention — each tagged with its platform-coloured badge (LZD in blue, SHP in orange, TTS in black, ZLR in purple). Set a base URL to make the "Open Interactive Newsletter" button clickable. When you hit <strong>Copy for email</strong>, the styled briefing — links live — is placed on your clipboard so it pastes into Gmail or Outlook exactly as previewed.</p>'
+      + '<p class="panel__hint">Generate the approved merchandising newsletter: platform-first, region-second, with the October newsletter header, full topic coverage, official source links, and supporting images only where no source link is available. Copy the styled HTML into Outlook or download it from Export &amp; PDF.</p>'
       + '<div class="scopepick">'
         + '<label><input type="radio" name="execScope" value="filtered" checked> Current filtered view ('+filteredSlides().length+')</label>'
         + '<label><input type="radio" name="execScope" value="all"> All slides ('+slides.length+')</label>'
