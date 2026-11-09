@@ -3947,9 +3947,10 @@ function wireAddPane(wrap){
   wrap.querySelectorAll('[data-delete-draft]').forEach(function(btn){btn.addEventListener('click',function(){
     var id=btn.getAttribute('data-delete-draft');
     if(!window.confirm('Delete this shared draft?'))return;
-    sharedDrafts=sharedDrafts.filter(function(x){return x.draftId!==id;});
-    if(state.editDraft&&state.editDraft.draftId===id)state.editDraft=blankDraft();
-    persistSharedDrafts('Draft deleted.').then(function(){renderAddPane(wrap);});
+    removeSharedDraft(id).then(function(){
+      if(state.editDraft&&state.editDraft.draftId===id)state.editDraft=blankDraft();
+      renderAddPane(wrap);
+    }).catch(function(){setStatus('Could not delete the shared draft. Please retry.',false);});
   });});
   wrap.querySelectorAll('[data-duplicate]').forEach(function(btn){btn.addEventListener('click',function(){startDuplicateEntry(btn.getAttribute('data-duplicate'));});});
 
@@ -4174,19 +4175,13 @@ function showAddUpdateErrors(errors){
 
 
 /* Drafts live in the shared Supabase store, outside published slides. */
-function persistSharedDrafts(message){
-  if(!AUTH.isConfigured())return Promise.reject(new Error('Shared storage is not configured.'));
-  setSyncStatus('Saving shared drafts…');
+function removeSharedDraft(id){
+  setSyncStatus('Updating shared drafts…');
   return AUTH.pull().then(function(remote){
-    remote.drafts=sharedDrafts.slice();
-    return AUTH.push(remote);
-  }).then(function(){
-    setSyncStatus('Shared drafts saved ✓',true);
-    if(message)setStatus(message,true);
-  }).catch(function(err){
-    setSyncStatus('Could not save drafts: '+(err.message||err),false);
-    setStatus('Draft was not saved to the shared store. Please retry.',false);
-    throw err;
+    remote.drafts=(Array.isArray(remote.drafts)?remote.drafts:[]).filter(function(x){return x.draftId!==id;});
+    return AUTH.push(remote).then(function(){sharedDrafts=remote.drafts;});
+  }).then(function(){setSyncStatus('Shared drafts updated ✓',true);}).catch(function(err){
+    setSyncStatus('Could not update shared drafts: '+(err.message||err),false);throw err;
   });
 }
 function saveSharedDraft(wrap){
@@ -4202,7 +4197,6 @@ function saveSharedDraft(wrap){
   item.draftId=id;item.id=null;item.updatedAt=now;item.updatedBy=who;
   item.createdAt=previous?previous.createdAt:now;
   item.createdBy=previous?previous.createdBy:who;
-  var next=sharedDrafts.filter(function(x){return x.draftId!==id;});next.push(item);
   // Commit to the local list only after the shared write succeeds.
   setSyncStatus('Saving shared drafts…');
   AUTH.pull().then(function(remote){
@@ -4315,8 +4309,10 @@ function saveEntry(wrap){
   saveSlides();
   if(d.draftId){
     var publishedDraftId=d.draftId;
-    sharedDrafts=sharedDrafts.filter(function(x){return x.draftId!==publishedDraftId;});
-    persistSharedDrafts('Draft published and removed from drafts.').catch(function(){});
+    // Queue cleanup after the published entry has reached shared storage.
+    _syncPushChain.then(function(){return removeSharedDraft(publishedDraftId);}).catch(function(){
+      setStatus('Entry published, but the old draft could not be removed. You can delete it manually.',false);
+    });
   }
   state.editDraft = blankDraft();     // reset for the next entry
   renderAddPane(wrap);
