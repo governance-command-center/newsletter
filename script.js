@@ -3555,15 +3555,21 @@ function renderAddPane(wrap){
       + '<div class="panel__head"><h2 class="panel__title">'+(editing?'Edit entry':'Add a new entry')+'</h2></div>'
       + '<p class="panel__hint">Fill in the update below. A single entry can cover <strong>several regions</strong> — tick each one under Region(s), and give each region its own link. <strong>Details</strong> is a rich-text editor — type freely, then select text and use the toolbar for <strong>bold</strong>, italic, headers, bullet lists, font size, colour and links. You can also <strong>paste a table</strong> straight into a text block and it will fit the width automatically. Add image blocks for pictures (up to 2). Everything flows into the browse views, presentation, email summary and PDF export.</p>'
 
+      + '<div class="addphase__section"><h3>1. Basic information</h3><p>When and where was the announcement published?</p></div>'
       + '<div class="formgrid">'
         + '<div class="formfield"><label>Input date</label><input type="date" id="fInputDate" value="'+esc(d.input_date||'')+'"><span class="formfield__hint">The date this update was logged. Drives grouping, filtering and the presentation.</span></div>'
         + '<div class="formfield"><label>Platform</label><select id="fPlatform">'+optionsHtml(ALLOWED_PLATFORMS, d.platform)+'</select></div>'
-        + regionFieldHtml(d, editing)
         + '<div class="formfield"><label>Publish date</label><input type="date" id="fDate" value="'+esc(d.date)+'"><span class="formfield__hint">Drives sorting, filtering and the presentation grouping.</span></div>'
         + '<div class="formfield"><label>Period covered — label (optional)</label><input type="text" id="fRange" value="'+esc(d.date_range)+'" placeholder="e.g. Jun 29 – Jul 3"><span class="formfield__hint">Display text shown on the entry; free-form.</span></div>'
-        + '<div class="formfield formfield--wide"><label>Title</label><input type="text" id="fTitle" value="'+esc(d.title)+'" placeholder="Headline for this update"></div>'
+        + '<div class="formfield formfield--wide"><label>Title <span class="addphase__required">*</span></label><input type="text" id="fTitle" value="'+esc(d.title)+'" placeholder="Headline for this update"><small class="addphase__error" data-error-for="fTitle"></small></div>'
+      + '</div>'
+      + '<div class="addphase__section"><h3>2. Coverage &amp; official sources</h3><p>Select all affected markets and paste the announcement link for each region, when available.</p></div>'
+      + '<div class="formgrid">'
+        + regionFieldHtml(d, editing)
         + linkFieldHtml(d, editing)
       + '</div>'
+      + '<small class="addphase__error" data-error-for="fRegions"></small>'
+      + '<div class="addphase__section"><h3>3. Announcement details</h3><p>Paste directly from Lazada University or Seller Center. Smart Paste keeps useful structure but removes source styling.</p></div>'
 
       + '<div class="detailhead">'
         + '<span class="detailhead__title">Details</span>'
@@ -3578,7 +3584,10 @@ function renderAddPane(wrap){
             })()
         + '</div>'
       + '</div>'
+      + '<div class="addphase__pastebar"><span>Paste mode:</span><label><input type="radio" name="pasteMode" value="smart" checked> Smart Paste</label><label><input type="radio" name="pasteMode" value="plain"> Plain text</label><button type="button" class="miniadd" id="cleanPastedFormatting">Clean formatting</button></div>'
       + '<div class="detailblocks" id="detailBlocks">'+blocksHtml+'</div>'
+      + '<small class="addphase__error" data-error-for="fDetails"></small>'
+      + '<div class="addphase__errors" id="addEntryErrors" role="alert" hidden></div>'
 
       + '<div class="formactions">'
         + '<button type="button" class="btn" id="saveEntryBtn">'+(editing?'Save changes':'Add entry')+'</button>'
@@ -3714,6 +3723,34 @@ function wireAddPane(wrap){
         var eds = wrap.querySelectorAll('.rtb__editor');
         if (eds.length) eds[eds.length-1].focus();
       }
+    });
+  });
+
+  // Smart Paste: strip source-specific styles while keeping headings, bullets, tables and links.
+  var cleanBtn=wrap.querySelector('#cleanPastedFormatting');
+  if(cleanBtn)cleanBtn.addEventListener('click',function(){
+    wrap.querySelectorAll('.rtb__editor').forEach(function(ed){
+      ed.innerHTML=cleanPastedAnnouncement(ed.innerHTML);
+      ed.dispatchEvent(new Event('input',{bubbles:true}));
+    });
+    setStatus('Pasted formatting cleaned. Headings, bullets, tables and links retained.',true);
+  });
+  wrap.querySelectorAll('.rtb__editor').forEach(function(ed){
+    ed.addEventListener('paste',function(e){
+      var clip=e.clipboardData;
+      if(!clip)return;
+      var mode=wrap.querySelector('input[name="pasteMode"]:checked');
+      var plain=mode&&mode.value==='plain';
+      var sourceHtml=clip.getData('text/html');
+      var sourceText=clip.getData('text/plain');
+      if(!sourceHtml&&!sourceText)return;
+      e.preventDefault();
+      var safe=plain?escapePlainAnnouncement(sourceText):cleanPastedAnnouncement(sourceHtml||escapePlainAnnouncement(sourceText));
+      ed.focus();
+      try{
+        if(!document.execCommand('insertHTML',false,safe))insertPasteAtCursor(ed,safe);
+      }catch(err){insertPasteAtCursor(ed,safe);}
+      ed.dispatchEvent(new Event('input',{bubbles:true}));
     });
   });
 
@@ -3945,9 +3982,87 @@ function applyRichCommand(cmd, arg, srcEl, d){
   if (!isNaN(i) && d.body[i]) d.body[i].html = sanitizeRichHtml(editor.innerHTML);
 }
 
+
+/* Phase 1: source-safe paste and inline save validation. */
+function escapePlainAnnouncement(s){
+  return String(s||'').split(/\r?\n/).map(function(line){return '<div>'+esc(line)+'</div>';}).join('');
+}
+function cleanPastedAnnouncement(raw){
+  var root=document.createElement('div');
+  root.innerHTML=String(raw||'');
+  root.querySelectorAll('script,style,iframe,object,embed,form,input,button,svg,canvas,video,audio,meta,link').forEach(function(n){n.remove();});
+  root.querySelectorAll('*').forEach(function(el){
+    var tag=el.tagName.toLowerCase();
+    var allowed=['p','div','span','br','strong','b','em','i','u','h1','h2','h3','h4','h5','h6','ul','ol','li','a','table','thead','tbody','tr','th','td','blockquote'];
+    if(allowed.indexOf(tag)<0){
+      var span=document.createElement('span');
+      while(el.firstChild)span.appendChild(el.firstChild);
+      el.replaceWith(span);
+      el=span;tag='span';
+    }
+    Array.prototype.slice.call(el.attributes).forEach(function(attr){
+      var name=attr.name.toLowerCase(),val=attr.value.trim();
+      if(tag==='a'&&name==='href'&&/^(https?:|mailto:)/i.test(val))return;
+      if((tag==='td'||tag==='th')&&(name==='colspan'||name==='rowspan')&&/^\d{1,2}$/.test(val))return;
+      el.removeAttribute(attr.name);
+    });
+    if(/^h[1-6]$/.test(tag)){
+      var heading=document.createElement('h4');
+      while(el.firstChild)heading.appendChild(el.firstChild);
+      el.replaceWith(heading);
+    }
+  });
+  return sanitizeRichHtml(root.innerHTML);
+}
+function insertPasteAtCursor(editor,html){
+  var sel=window.getSelection();
+  if(!sel||!sel.rangeCount||!editor.contains(sel.anchorNode)){
+    editor.insertAdjacentHTML('beforeend',html);return;
+  }
+  var range=sel.getRangeAt(0);
+  range.deleteContents();
+  var frag=range.createContextualFragment(html);
+  var last=frag.lastChild;
+  range.insertNode(frag);
+  if(last){range.setStartAfter(last);range.collapse(true);sel.removeAllRanges();sel.addRange(range);}
+}
+function validateAddUpdate(d){
+  var errors=[];
+  if(!d.title||!d.title.trim())errors.push({field:'fTitle',message:'Enter an announcement title.'});
+  if(!d.input_date||!/^\d{4}-\d{2}-\d{2}$/.test(d.input_date)||isNaN(Date.parse(d.input_date)))errors.push({field:'fInputDate',message:'Choose a valid input date.'});
+  if(d.date&&(!/^\d{4}-\d{2}-\d{2}$/.test(d.date)||isNaN(Date.parse(d.date))))errors.push({field:'fDate',message:'Choose a valid publish date, or leave it blank if unknown.'});
+  if(!Array.isArray(d.regions)||!d.regions.length)errors.push({field:'fRegions',message:'Select at least one region.'});
+  var urls=(d.regions||[]).map(function(r){return d.links&&d.links[r]||'';}).filter(Boolean);
+  if(!urls.length&&d.link)urls.push(d.link);
+  urls.forEach(function(url){try{var parsed=new URL(url);if(!/^https?:$/.test(parsed.protocol))throw Error('bad');}catch(e){errors.push({field:'fLinks',message:'Source URLs must start with https:// or http://.'});}});
+  if(d.body.some(function(b){return b.type==='image'&&b.uploading;}))errors.push({field:'fDetails',message:'Wait until image uploads finish.'});
+  var hasBody=d.body.some(function(b){return b.type==='rich'&&richToText(b.html||'')||b.type==='table'&&(b.rows||[]).some(function(row){return row.some(function(cell){return String(cell).trim();});})||b.type==='image'&&!!b.dataUrl;});
+  if(!hasBody)errors.push({field:'fDetails',message:'Add announcement details before saving.'});
+  return errors;
+}
+function showAddUpdateErrors(errors){
+  document.querySelectorAll('.addphase__error').forEach(function(n){n.textContent='';});
+  document.querySelectorAll('.addphase__invalid').forEach(function(n){n.classList.remove('addphase__invalid');});
+  errors.forEach(function(err){
+    var target=document.querySelector('[data-error-for="'+err.field+'"]');
+    if(target)target.textContent=err.message;
+    var input=document.getElementById(err.field);
+    if(input){input.classList.add('addphase__invalid');input.setAttribute('aria-invalid','true');}
+  });
+  var box=document.getElementById('addEntryErrors');
+  if(box){box.hidden=!errors.length;box.textContent=errors.length?'Please fix: '+errors.map(function(e){return e.message;}).join(' '):'';}
+  if(errors.length){
+    var first=document.getElementById(errors[0].field)||document.querySelector('[data-error-for="'+errors[0].field+'"]');
+    if(first&&first.scrollIntoView)first.scrollIntoView({behavior:'smooth',block:'center'});
+  }
+}
+
 function saveEntry(wrap){
   syncDraftFromForm();
   var d = state.editDraft;
+  var phaseErrors=validateAddUpdate(d);
+  showAddUpdateErrors(phaseErrors);
+  if(phaseErrors.length){setStatus('Please correct the highlighted fields before saving.',false);return;}
 
   // validation
   if (d.body.some(function(b){ return b.type==='image' && b.uploading; })){
