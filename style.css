@@ -1329,3 +1329,11 @@ input:not([type=checkbox]):not([type=radio]),select,textarea{border-radius:9px}
 .addphase__errors:not([hidden]){padding:10px 12px;margin:10px 0;border-radius:8px;border:1px solid #e9b7b3;background:#fff4f2;color:#923129;font-size:12px;}
 
 #fCoverageStartWrap[hidden],#fCoverageEndWrap[hidden]{display:none !important;}
+
+/* Phase 2: shared unpublished draft queue */
+.addphase__draftlist{display:flex;flex-direction:column;gap:8px;padding:4px 0 12px;}
+.addphase__draftrow{display:flex;align-items:center;justify-content:space-between;gap:16px;border:1px solid var(--line);border-radius:9px;padding:12px 14px;}
+.addphase__draftrow strong{display:block;color:var(--ink);font-size:13px;overflow-wrap:anywhere;}
+.addphase__draftrow small{display:block;color:var(--muted);font-size:11px;margin-top:4px;}
+.addphase__draftrow>div:last-child{display:flex;gap:8px;flex-shrink:0;}
+@media(max-width:620px){.addphase__draftrow{align-items:flex-start;flex-direction:column;}.addphase__draftrow>div:last-child{width:100%;}}
