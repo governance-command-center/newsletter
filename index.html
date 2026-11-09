@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Merchandising Updates Hub</title>
+<title>Platform Updates</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
@@ -18,32 +18,57 @@
   <!-- ===================== LEFT NAV ===================== -->
   <aside class="sidebar" id="sidebar">
     <div class="sidebar__brand">
-      <div class="sidebar__mark">MU</div>
+      <div class="sidebar__mark">PU</div>
       <div class="sidebar__brandtext">
-        <span class="sidebar__eyebrow">MERCHANDISING</span>
-        <span class="sidebar__name">Updates Hub</span>
+        <span class="sidebar__eyebrow">Company Newsletter</span>
+        <span class="sidebar__name">Platform Updates</span>
       </div>
     </div>
 
-    <nav class="nav nav--workspace" aria-label="Workspace">
-      <div class="nav__label">Workspace</div>
-      <button type="button" class="nav__item" data-nav="overview"><span class="nav__ico" aria-hidden="true">◫</span><span class="nav__text">Overview</span></button>
-      <button type="button" class="nav__item is-active" data-nav="browse"><span class="nav__ico" aria-hidden="true">▤</span><span class="nav__text">Updates Library</span></button>
-      <button type="button" class="nav__item" data-nav="add"><span class="nav__ico" aria-hidden="true">＋</span><span class="nav__text">Add Update</span></button>
-      <button type="button" class="nav__item" data-nav="present"><span class="nav__ico" aria-hidden="true">▣</span><span class="nav__text">Presentation</span></button>
+    <nav class="nav" id="adminNav" aria-label="Admin">
+      <div class="nav__label">Manage</div>
+      <button type="button" class="nav__item" data-nav="add">
+        <span class="nav__ico" aria-hidden="true">&#10133;</span>
+        <span class="nav__text">Add entry</span>
+      </button>
+      <!-- Import slides temporarily hidden from the UI. To restore, uncomment this block.
+      <button type="button" class="nav__item" data-nav="import">
+        <span class="nav__ico" aria-hidden="true">&#128229;</span>
+        <span class="nav__text">Import slides</span>
+      </button>
+      -->
+      <button type="button" class="nav__item" data-nav="export">
+        <span class="nav__ico" aria-hidden="true">&#128228;</span>
+        <span class="nav__text">Export slides</span>
+      </button>
+      <button type="button" class="nav__item" data-nav="email">
+        <span class="nav__ico" aria-hidden="true">&#9993;&#65039;</span>
+        <span class="nav__text">Generate email</span>
+      </button>
+      <button type="button" class="nav__item" data-nav="archive">
+        <span class="nav__ico" aria-hidden="true">&#128230;</span>
+        <span class="nav__text">Archive</span>
+      </button>
+      <button type="button" class="nav__item" data-nav="members">
+        <span class="nav__ico" aria-hidden="true">&#128101;</span>
+        <span class="nav__text">Members</span>
+      </button>
     </nav>
-    <nav class="nav" aria-label="Publishing">
-      <div class="nav__label">Publishing</div>
-      <button type="button" class="nav__item" data-nav="email"><span class="nav__ico" aria-hidden="true">✉</span><span class="nav__text">Newsletter Email</span></button>
-      <button type="button" class="nav__item" data-nav="export"><span class="nav__ico" aria-hidden="true">⇩</span><span class="nav__text">Export &amp; PDF</span></button>
-      <button type="button" class="nav__item" data-nav="archive"><span class="nav__ico" aria-hidden="true">▧</span><span class="nav__text">Archive</span></button>
+
+    <nav class="nav" aria-label="Primary">
+      <div class="nav__label">Browse</div>
+      <button type="button" class="nav__item is-active" data-nav="browse">
+        <span class="nav__ico" aria-hidden="true">&#128218;</span>
+        <span class="nav__text">Browse updates</span>
+      </button>
+      <button type="button" class="nav__item" data-nav="present">
+        <span class="nav__ico" aria-hidden="true">&#127909;</span>
+        <span class="nav__text">Present</span>
+      </button>
     </nav>
-    <nav class="nav" id="adminNav" aria-label="Administration">
-      <div class="nav__label">Administration</div>
-      <button type="button" class="nav__item" data-nav="members"><span class="nav__ico" aria-hidden="true">♙</span><span class="nav__text">Members</span></button>
-    </nav>
+
     <div class="sidebar__foot">
-      Regional PIC updates are maintained in the shared repository.
+      The source deck is the fix point, not this page.
     </div>
   </aside>
 
@@ -76,7 +101,7 @@
     </section>
 
     <footer class="footer">
-      <p>Merchandising knowledge-sharing workspace. Updates are maintained by regional PICs; contact the responsible PIC for corrections.</p>
+      <p>Generated automatically from the source deck. Spot something off? Flag it to the PIC &#8212; the source file is the fix point, not this page. Use the Admin section in the sidebar to add entries or generate an email.</p>
     </footer>
   </div>
 

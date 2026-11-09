@@ -725,14 +725,13 @@ var BROWSE_VIEWS = { browse: true };
 function isBrowseNav(nav){ return !!BROWSE_VIEWS[nav]; }
 
 var NAV_META = {
-  overview: { title: 'Overview', sub: 'A clear view of merchandising updates across regions and platforms.' },
-  browse:   { title: 'Updates Library', sub: 'Every update in one place — group by platform or region, filter, and search.' },
+  browse:   { title: 'Browse updates', sub: 'Every update in one place — group by platform or region, filter, and search.' },
   present:  { title: 'Present', sub: 'Full-screen walkthrough, grouped by date, then region, then platform.' },
-  add:      { title: 'Add Update', sub: 'Add a new update directly, or edit an existing one.' },
+  add:      { title: 'Add entry', sub: 'Add a new update directly, or edit an existing one.' },
   import:   { title: 'Import slides', sub: 'Bring in a PowerPoint deck or a JSON backup.' },
-  export:   { title: 'Export & PDF', sub: 'Download the current view as PDF or JSON.' },
+  export:   { title: 'Export slides', sub: 'Download the current view as PDF or JSON.' },
   archive:  { title: 'Archive', sub: 'Set aside past entries to keep the current set clean. Restore or export any batch later.' },
-  email:    { title: 'Newsletter Email', sub: 'A leadership briefing you can preview and paste straight into your inbox.' },
+  email:    { title: 'Generate email', sub: 'A leadership briefing you can preview and paste straight into your inbox.' },
   members:  { title: 'Members', sub: 'Create users and passwords, reset them, and manage who can access this tool.' }
 };
 
@@ -1995,7 +1994,7 @@ function exportJson(listArg, labelArg){
 // This is the "include the source" export: each entry's source URL is rendered
 // exactly as it is in the email ("Read more →"), so the file is a self-contained,
 // forwardable copy of the briefing.
-function exportEmailHtml(listArg, labelArg){
+async function exportEmailHtml(listArg, labelArg){
   var scope = currentExportScope();
   var list = listArg || (scope === 'filtered' ? filteredSlides() : slides);
   if (!listArg) list = slidesByInputDate(list, state.exportDateFilter);
@@ -2005,7 +2004,7 @@ function exportEmailHtml(listArg, labelArg){
   var criticalList = pickCriticalUpdates(list);           // all, ranked by urgency
   var periodLabel = reportingPeriodLabel(list);
 
-  var html = buildExecEmailHtml(list, criticalList, { periodLabel: periodLabel, baseUrl: baseUrl, thumbs: {} });
+  var html = approvedEmailHtml(list);
 
   var stamp = new Date().toISOString().slice(0,10);
   var slug = (labelArg ? labelArg.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'') : scope) || 'export';
@@ -2063,7 +2062,7 @@ function exportPdf(listArg, labelArg){
   var jsPDFCtor = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
   if (jsPDFCtor){
     try {
-      exportPdfVector(list, labelArg, jsPDFCtor);
+      approvedPdfVector(list, labelArg, jsPDFCtor);
       return;
     } catch (e){
       setStatus('Vector PDF failed ('+(e && e.message ? e.message : 'error')+') — falling back to the print dialog.', false);
@@ -2368,7 +2367,7 @@ function exportPdfVector(list, labelArg, jsPDFCtor){
 
 function exportPdfPrint(list, labelArg){
   var printArea = document.getElementById('printArea');
-  printArea.innerHTML = buildPrintDoc(list, labelArg);
+  printArea.innerHTML = approvedPrintHtml(list);
 
   var imgs = Array.prototype.slice.call(printArea.querySelectorAll('img'));
   if (!imgs.length){
@@ -2846,6 +2845,129 @@ function emailLinkRow(s){
     : '';
 }
 
+
+/* Approved newsletter output — isolated from accounts, shared storage and library. */
+function approvedGroups(list){
+  var groups={}, platforms=[];
+  list.forEach(function(s){
+    var p=s.platform||'Others';if(!groups[p]){groups[p]={};platforms.push(p);}
+    var regs=entryRegions(s),reg=regs.length===1?regs[0]:'Regional';
+    if(!groups[p][reg])groups[p][reg]=[];
+    groups[p][reg].push(s);
+  });
+  platforms.sort(function(a,b){return ALLOWED_PLATFORMS.indexOf(a)-ALLOWED_PLATFORMS.indexOf(b);});
+  return {groups:groups,platforms:platforms};
+}
+function approvedLinks(s){
+  var m=entryLinks(s),r=entryRegions(s),out=[];
+  r.forEach(function(reg){if(m[reg]&&!out.some(function(v){return v.url===m[reg];}))out.push({region:reg,url:m[reg]});});
+  if(!out.length&&s.link)out.push({region:'',url:s.link});return out;
+}
+function approvedText(s){
+  return (s.body||[]).map(function(b){
+    if(b.type==='rich')return richToText(b.html||'');
+    if(b.type==='table'&&b.rows)return b.rows.map(function(row){return row.join(' | ');}).join('; ');
+    return b.text||'';
+  }).filter(Boolean).join(' ').replace(/\s+/g,' ').trim();
+}
+function approvedImages(s){return (s.body||[]).filter(function(b){return b.type==='image'&&(b.dataUrl||b.url);}).map(function(b){return b.dataUrl||b.url;});}
+function approvedRegion(reg){return ({Malaysia:'MY',Philippines:'PH',Singapore:'SG',Thailand:'TH',Vietnam:'VN',Indonesia:'ID'})[reg]||reg;}
+function approvedRegions(group){
+  return Object.keys(group).sort(function(a,b){
+    var ia=ALLOWED_REGIONS.indexOf(a),ib=ALLOWED_REGIONS.indexOf(b);
+    return (ia<0?999:ia)-(ib<0?999:ib);
+  });
+}
+function approvedEmailHtml(list){
+  var grouped=approvedGroups(list),period=periodCoveredLabel(list);
+  var html='<!doctype html><html><head><meta charset="utf-8"><title>Merchandising Newsletter</title></head><body style="margin:0;background:#edf2f7;font-family:Arial,Helvetica,sans-serif;color:#152d49">'
+    +'<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#edf2f7"><tr><td align="center" style="padding:22px 12px">'
+    +'<table role="presentation" width="760" cellspacing="0" cellpadding="0" style="width:100%;max-width:760px;background:white">'
+    +'<tr><td bgcolor="#102b4c" style="background:#102b4c;border-top:5px solid #27c3d8;padding:36px 38px">'
+    +'<div style="color:#7ddde7;font-size:11px;letter-spacing:2px;font-weight:bold">SYNAGIE / MERCHANDISING INTELLIGENCE</div>'
+    +'<div style="color:white;font-size:30px;font-weight:bold;line-height:1.3;margin-top:16px">Marketplace updates,<br>made easy to scan.</div>'
+    +'<div style="color:#c8dce9;font-size:14px;margin-top:15px">'+esc(period)+' &nbsp;·&nbsp; Regional marketplace digest</div></td></tr>'
+    +'<tr><td bgcolor="#eaf8fc" style="padding:22px 38px;background:#eaf8fc">'
+    +'<div style="color:#347d8f;font-size:11px;letter-spacing:2px;font-weight:bold">AT A GLANCE</div>'
+    +'<div style="color:#102b4c;font-size:16px;font-weight:bold;margin-top:8px">'+grouped.platforms.length+' platforms &nbsp;·&nbsp; '+list.length+' updates &nbsp;·&nbsp; Regional coverage</div>'
+    +'<div style="color:#526b7c;font-size:13px;margin-top:8px">Seller policies, operational changes, new tools and upcoming campaigns.</div></td></tr>'
+    +'<tr><td style="padding:24px 38px 8px;font-size:14px;line-height:1.7">Hi team,<p>Here are the latest marketplace announcements and key operational updates, grouped by platform and region.</p></td></tr>';
+  grouped.platforms.forEach(function(platform,pi){
+    var regs=approvedRegions(grouped.groups[platform]),count=regs.reduce(function(n,r){return n+grouped.groups[platform][r].length;},0);
+    html+='<tr><td style="padding:22px 38px 0"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td bgcolor="#102b4c" style="background:#102b4c;border-left:5px solid #ed703a;padding:16px 19px;color:white">'
+      +'<div style="font-size:10px;letter-spacing:1.5px;color:#b3cddd">PLATFORM '+String(pi+1).padStart(2,'0')+'</div><div style="font-size:23px;font-weight:bold;margin-top:5px">'+esc(platform==='Tiktok'?'TikTok':platform)+'</div>'
+      +'</td><td align="right" bgcolor="#102b4c" style="background:#102b4c;color:#b3cddd;font-size:12px;padding:18px">'+count+' updates</td></tr></table></td></tr>';
+    regs.forEach(function(reg){
+      var entries=grouped.groups[platform][reg];
+      html+='<tr><td style="padding:20px 38px 0;color:#087e98;font-size:11px;letter-spacing:1.5px;font-weight:bold;border-bottom:1px solid #e1ebf0">'+esc(approvedRegion(reg))+' &nbsp; / &nbsp; '+entries.length+' updates</td></tr>';
+      entries.forEach(function(s,i){
+        var text=approvedText(s),summary=text.length>410?text.slice(0,410).replace(/\s+\S*$/,'')+'…':text;
+        var links=approvedLinks(s),images=links.length?[]:approvedImages(s);
+        html+='<tr><td style="padding:17px 38px 5px"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-bottom:1px solid #e6edf2"><tr>'
+          +'<td width="35" valign="top" style="color:#087e98;font-weight:bold;font-size:12px;padding:3px 10px 16px 0">'+String(i+1).padStart(2,'0')+'</td>'
+          +'<td style="padding-bottom:19px"><div style="font-size:15px;font-weight:bold;line-height:1.45">'+esc(s.title||'Untitled update')+'</div>'
+          +'<div style="font-size:13px;line-height:1.7;color:#50677a;margin-top:7px">'+esc(summary)+'</div>';
+        links.forEach(function(link){html+='<div style="margin-top:10px"><a href="'+esc(link.url)+'" style="color:#008ca5;text-decoration:none;font-size:12px;font-weight:bold">'+(links.length>1?esc(approvedRegion(link.region))+' — ':'')+'Official source ›</a></div>';});
+        images.forEach(function(url){html+='<table role="presentation" align="center" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:12px 0"><img alt="Supporting marketplace update" src="'+esc(url)+'" style="display:block;margin:0 auto;max-width:100%;height:auto;border:0" width="580"></td></tr></table>';});
+        html+='</td></tr></table></td></tr>';
+      });
+    });
+  });
+  return html+'<tr><td style="height:35px"></td></tr></table></td></tr></table></body></html>';
+}
+function approvedPrintHtml(list){
+  var grouped=approvedGroups(list),html='<div class="approved-pdf" style="max-width:800px;margin:auto;padding:22px 36px;background:white;color:#152d49;font-family:Arial,sans-serif">'
+    +'<h1 style="text-align:center;font-size:25px;margin:10px 0 12px">Merchandising Newsletter</h1>'
+    +'<p style="text-align:center;font-size:12px;color:#64788a;margin:0 0 35px">Marketplace updates for '+esc(periodCoveredLabel(list))+'</p>';
+  grouped.platforms.forEach(function(p){
+    html+='<h2 style="font-size:19px;margin:28px 0 14px;page-break-after:avoid">'+esc(p==='Tiktok'?'TikTok':p)+'</h2>';
+    approvedRegions(grouped.groups[p]).forEach(function(reg){
+      html+='<h3 style="font-size:13px;color:#087e98;margin:20px 0 10px;page-break-after:avoid">'+esc(approvedRegion(reg))+'</h3>';
+      grouped.groups[p][reg].forEach(function(s,i){
+        html+='<section style="border-bottom:1px solid #e2e9ee;padding:9px 0 15px;break-inside:avoid;page-break-inside:avoid">'
+          +'<h4 style="font-size:12px;margin:0 0 8px">'+String(i+1).padStart(2,'0')+'. '+esc(s.title||'Untitled update')+'</h4>'
+          +'<div style="font-size:11px;line-height:1.6;color:#50677a">'+esc(approvedText(s))+'</div>';
+        var links=approvedLinks(s);
+        links.forEach(function(l){html+='<p><a href="'+esc(l.url)+'" style="font-size:11px;color:#008ca5">'+(links.length>1?esc(approvedRegion(l.region))+' — ':'')+'Official source</a></p>';});
+        if(!links.length)approvedImages(s).forEach(function(url){html+='<div style="text-align:center;margin:12px 0"><img src="'+esc(url)+'" style="max-width:90%;height:auto"></div>';});
+        html+='</section>';
+      });
+    });
+  });
+  return html+'</div>';
+}
+function approvedPdfVector(list,label,jsPDFCtor){
+  var doc=new jsPDFCtor({unit:'pt',format:'a4',compress:true}),W=doc.internal.pageSize.getWidth(),H=doc.internal.pageSize.getHeight(),margin=48,max=W-2*margin,y=46;
+  function next(h){if(y+h>H-45){doc.addPage();y=45;}}
+  function draw(text,size,bold,color,leading){
+    doc.setFont('helvetica',bold?'bold':'normal');doc.setFontSize(size);
+    doc.setTextColor.apply(doc,color||[30,50,70]);
+    var lines=doc.splitTextToSize(String(text||'').replace(/[^\x20-\x7e\n]/g,' ').replace(/\s+/g,' ').trim(),max);
+    lines.forEach(function(line){next(leading||size*1.55);doc.text(line,margin,y);y+=leading||size*1.55;});
+  }
+  doc.setFont('helvetica','bold');doc.setFontSize(22);doc.setTextColor(20,43,70);doc.text('Merchandising Newsletter',W/2,y,{align:'center'});y+=28;
+  doc.setFont('helvetica','normal');doc.setFontSize(10);doc.text('Marketplace updates for '+periodCoveredLabel(list),W/2,y,{align:'center'});y+=42;
+  var grouped=approvedGroups(list);
+  grouped.platforms.forEach(function(p){
+    next(45);draw(p==='Tiktok'?'TikTok':p,17,true,[20,43,70],25);y+=7;
+    approvedRegions(grouped.groups[p]).forEach(function(reg){
+      next(32);draw(approvedRegion(reg),12,true,[8,126,152],20);y+=3;
+      grouped.groups[p][reg].forEach(function(s,i){
+        next(44);draw(String(i+1).padStart(2,'0')+'. '+s.title,11,true,[20,43,70],17);y+=4;
+        draw(approvedText(s),9.5,false,[75,96,113],15);
+        var links=approvedLinks(s);
+        links.forEach(function(l){next(25);doc.setFontSize(10);doc.setTextColor(8,130,152);doc.textWithLink((links.length>1?approvedRegion(l.region)+' - ':'')+'Official source',margin,y+7,{url:l.url});y+=23;});
+        if(!links.length)approvedImages(s).forEach(function(url){
+          try{var info=doc.getImageProperties(url),w=Math.min(max-25,info.width),h=w*info.height/info.width;if(h>290){w*=290/h;h=290;}next(h+18);doc.addImage(url,info.fileType||'PNG',(W-w)/2,y,w,h);y+=h+14;}catch(e){}
+        });
+        next(18);doc.setDrawColor(224,231,237);doc.line(margin,y+6,W-margin,y+6);y+=20;
+      });
+    });
+  });
+  doc.save('Merchandising_Newsletter_'+new Date().toISOString().slice(0,10)+'.pdf');
+  setStatus('Exported approved-format newsletter PDF ('+list.length+' updates).',true);
+}
+
 function buildExecEmailHtml(list, criticalList, opts){
 
   opts = opts || {};
@@ -2979,7 +3101,7 @@ function emailBodyFragment(fullHtml){
   // the centring padding. Nested inside the compose window's OWN table they
   // collapse and squeeze the content, so we hand the client the inner card table
   // directly.
-  var card = /<table role="presentation" width="640"[\s\S]*<\/table>/i.exec(inner);
+  var card = /<table role="presentation" width="760"[\s\S]*<\/table>/i.exec(inner);
   if (!card) return inner;
 
   var html = card[0];
@@ -2993,8 +3115,8 @@ function emailBodyFragment(fullHtml){
   //   1. width="640" as an HTML attribute. Outlook renders through Word, which
   //      honours the attribute over CSS, so this alone keeps it at 640.
   //   2. max-width:640px in the inline style, which caps it even at width:100%.
-  html = html.replace(/(<table role="presentation")\s+width="640"/i, '$1 width="100%"');
-  html = html.replace(/max-width:640px;\s*/i, '');
+  html = html.replace(/(<table role="presentation")\s+width="760"/i, '$1 width="100%"');
+  html = html.replace(/max-width:760px;\s*/i, '');
   html = html.replace(/(<table role="presentation" width="100%"[^>]*style=")/i, '$1width:100%;');
 
   return html;
@@ -3098,36 +3220,18 @@ async function generateExecEmail(){
   var periodLabel = reportingPeriodLabel(list);
 
   // Badges are lettered platform codes, so no image processing is needed.
-  state.execHtml = buildExecEmailHtml(list, criticalList, { periodLabel: periodLabel, baseUrl: baseUrl, thumbs: {} });
+  state.execHtml = approvedEmailHtml(list);
   renderExecPreview();
-  setStatus('Generated the executive email — all ' + list.length + ' update' + (list.length === 1 ? '' : 's') + ' included, ordered by urgency, each with its platform badge (' + platformCode('Lazada') + ', ' + platformCode('Shopee') + ', ' + platformCode('Tiktok') + ', ' + platformCode('Zalora') + ').', true);
+  setStatus('Generated the approved newsletter — all ' + list.length + ' update' + (list.length === 1 ? '' : 's') + ' included, ordered by urgency, each with its platform badge (' + platformCode('Lazada') + ', ' + platformCode('Shopee') + ', ' + platformCode('Tiktok') + ', ' + platformCode('Zalora') + ').', true);
 }
 
 /* ============================================================
    ADMIN PANES (rendered into #workspaceBody, one per nav item)
    ============================================================ */
-function renderOverviewPane(wrap){
-  var now=new Date(),weekStart=new Date(now);weekStart.setDate(now.getDate()-((now.getDay()+6)%7));weekStart.setHours(0,0,0,0);
-  var recent=slides.slice().sort(function(a,b){return String(b.created_at||b.updated_at||b.input_date||b.date||'').localeCompare(String(a.created_at||a.updated_at||a.input_date||a.date||''));});
-  var thisWeek=slides.filter(function(e){var d=new Date(e.created_at||e.input_date||e.date||0);return !isNaN(d.getTime())&&d>=weekStart;}).length;
-  var platforms=new Set(slides.map(function(e){return e.platform;}).filter(Boolean));
-  var regions=new Set();slides.forEach(function(e){entryRegions(e).forEach(function(r){regions.add(r);});});
-  wrap.innerHTML='<div class="overview">'
-    +'<div class="overview__hero"><div><div class="overview__eyebrow">MERCHANDISING INTELLIGENCE</div><h2>One workspace. Every marketplace update.</h2><p>Keep regional knowledge sharing, weekly presentations, and newsletter preparation connected.</p></div><div class="overview__hero-actions"><button class="btn" data-go="add">+ Add update</button><button class="btn btn--ghost" data-go="browse">Explore library</button></div></div>'
-    +'<div class="overview__metrics">'
-    +[['Total updates',slides.length,'▤'],['This week',thisWeek,'◷'],['Regions covered',regions.size,'◎'],['Platforms',platforms.size,'◈']].map(function(m){return '<div class="overview__metric"><span>'+m[0]+'</span><strong>'+m[1]+'</strong><small>'+m[2]+'</small></div>';}).join('')
-    +'</div>'
-    +'<div class="overview__columns"><section class="overview__section"><div class="overview__section-head"><h3>Recent updates</h3><button data-go="browse">View all →</button></div>'
-    +(recent.length?recent.slice(0,6).map(function(e){return '<div class="overview__entry"><div class="overview__entry-meta">'+esc(e.platform||'Update')+' · '+esc(entryRegions(e).join(', ')||'Regional')+'</div><strong>'+esc(e.title||'Untitled update')+'</strong><small>'+esc(e.input_date||e.date||'')+'</small></div>';}).join(''):'<p>No updates have been submitted yet.</p>')
-    +'</section><section class="overview__section overview__quick"><h3>Quick actions</h3><p>Pick up where your team left off.</p><button data-go="present"><span>▣</span><span><strong>Start presentation</strong><small>Walk through regional updates</small></span>→</button><button data-go="email"><span>✉</span><span><strong>Generate newsletter</strong><small>Prepare an Outlook-ready email</small></span>→</button><button data-go="export"><span>⇩</span><span><strong>Export report</strong><small>Download PDF and backups</small></span>→</button></section></div></div>';
-  wrap.querySelectorAll('[data-go]').forEach(function(el){el.addEventListener('click',function(){setNav(el.getAttribute('data-go'));});});
-}
-
 function renderWorkspace(){
   var wrap = document.getElementById('workspaceBody');
   if (!wrap) return;
-  if (state.nav === 'overview')    renderOverviewPane(wrap);
-  else if (state.nav === 'add')         renderAddPane(wrap);
+  if (state.nav === 'add')         renderAddPane(wrap);
   else if (state.nav === 'import') renderImportPane(wrap);
   else if (state.nav === 'export') renderExportPane(wrap);
   else if (state.nav === 'archive') renderArchivePane(wrap);
