@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hub Auth Pilot — Internal Test Only</title>
+<style>
+:root{font:15px system-ui,sans-serif;color:#172033;background:#f5f7fb}
+body{margin:0;padding:32px 16px}main{max-width:690px;margin:auto}
+h1{font-size:1.55rem}section{background:white;border:1px solid #dbe1e9;border-radius:12px;padding:20px;margin:16px 0}
+label{display:block;margin:12px 0 4px;font-weight:600}
+input,select,button,textarea{font:inherit;box-sizing:border-box}
+input,select,textarea{width:100%;padding:10px;border:1px solid #a9b5c5;border-radius:7px}
+button{background:#1b467e;color:white;border:0;border-radius:7px;padding:10px 15px;margin:12px 6px 0 0;cursor:pointer}
+button:disabled{opacity:.5;cursor:wait}button.secondary{background:#64748b}
+small{color:#536176}#status{white-space:pre-wrap;padding:12px;background:#e9eff8;border-radius:8px}
+[hidden]{display:none!important}textarea{min-height:180px;font-family:ui-monospace,monospace}
+</style></head><body><main>
+<h1>Merchandising Hub — Auth Pilot</h1>
+<p><strong>Internal test page only.</strong> Not connected to the live Hub. Do not enter production credentials until deployment and policies are reviewed.</p>
+<section id="setup"><h2>Test project connection</h2>
+<label for="url">Supabase project URL</label><input id="url" placeholder="https://project.supabase.co" autocomplete="off">
+<label for="key">Publishable/anon key (never service-role)</label><input id="key" type="password" autocomplete="off">
+<button id="connect">Connect</button><small>Connection stays in this page's memory; no key is saved.</small></section>
+<section id="login" hidden><h2>Member sign in</h2>
+<label for="username">Username</label><input id="username" autocomplete="username">
+<label for="password">Password</label><input id="password" type="password" autocomplete="current-password">
+<button id="signin">Sign in</button></section>
+<section id="change" hidden><h2>Set your own password</h2><p>Temporary password must be changed before accessing the Hub.</p>
+<label for="newpass">New password (12–128 characters)</label><input id="newpass" type="password" autocomplete="new-password">
+<button id="changebtn">Change password and sign in again</button></section>
+<section id="member" hidden><h2>Authenticated test session</h2>
+<p id="role"></p><button id="read">Read latest store</button><button id="signout" class="secondary">Sign out</button>
+<p><small>Read is non-destructive. Save is deliberately disabled on this pilot page to protect the existing shared dataset.</small></p>
+</section>
+<section id="admin" hidden><h2>Admin account tools</h2>
+<label for="target">Member username</label><input id="target" autocomplete="off" placeholder="newsletter_member01">
+<label for="temp">Temporary password (12–128 characters)</label><input id="temp" type="password" autocomplete="new-password">
+<label for="roleinput">Role</label><select id="roleinput"><option value="member">Member</option><option value="admin">Admin</option></select>
+<button id="create">Create member</button><button id="reset" class="secondary">Reset password</button>
+<p><small>Only a trusted authenticated administrator may use these actions. Share temporary passwords privately.</small></p></section>
+<section><h2>Result</h2><div id="status" role="status" aria-live="polite">Ready. This page has not connected to Supabase.</div></section>
+</main><script src="../secure-client.staged.js"></script><script>
+(function(){
+"use strict";
+var client=null;
+var $=function(id){return document.getElementById(id)};
+function show(id,on){$(id).hidden=!on}
+function status(message){$('status').textContent=message}
+async function run(button,work){
+  button.disabled=true;
+  try{await work()}catch(e){status('Error: '+e.message)}
+  finally{button.disabled=false}
+}
+$('connect').onclick=function(){run(this,async function(){
+  client=createHubSecureClient($('url').value.trim(),$('key').value.trim());
+  show('login',true);status('Adapter initialized. No request sent yet.');
+})};
+$('signin').onclick=function(){run(this,async function(){
+  if(!client)throw Error('Connect first');
+  var result=await client.login($('username').value.trim().toLowerCase(),$('password').value);
+  $('password').value='';
+  show('login',false);show('change',result.mustChangePassword);
+  show('member',!result.mustChangePassword);show('admin',!result.mustChangePassword&&result.role==='admin');
+  $('role').textContent='Role: '+result.role;
+  status(result.mustChangePassword?'Temporary password: change required.':'Signed in as '+result.role);
+})};
+$('changebtn').onclick=function(){run(this,async function(){
+  await client.changePassword($('newpass').value);
+  $('newpass').value='';show('change',false);show('login',true);
+  status('Password updated. Sign in again with your new password.');
+})};
+$('read').onclick=function(){run(this,async function(){
+  var data=await client.read();
+  status('Read successful. Entries: '+(Array.isArray(data.slides)?data.slides.length:0)+
+    '; drafts: '+(Array.isArray(data.drafts)?data.drafts.length:0)+
+    '; archives: '+(Array.isArray(data.archives)?data.archives.length:0));
+})};
+$('signout').onclick=function(){client.logout();show('member',false);show('admin',false);show('login',true);status('Signed out locally.')};
+$('create').onclick=function(){run(this,async function(){
+  var result=await client.createUser($('target').value.trim().toLowerCase(),$('temp').value,$('roleinput').value);
+  $('temp').value='';status('Account created: '+result.username);
+})};
+$('reset').onclick=function(){run(this,async function(){
+  await client.resetPassword($('target').value.trim().toLowerCase(),$('temp').value);
+  $('temp').value='';status('Password reset. Member must change it on next login.');
+})};
+})();
+</script></body></html>
