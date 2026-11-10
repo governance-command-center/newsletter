@@ -15,10 +15,7 @@ small{color:#536176}#status{white-space:pre-wrap;padding:12px;background:#e9eff8
 </style></head><body><main>
 <h1>Merchandising Hub — Auth Pilot</h1>
 <p><strong>Internal test page only.</strong> Connected to the existing Supabase project for authentication checks. This page cannot save Hub entries. Use only the approved admin account.</p>
-<section id="setup"><h2>Existing project connection</h2>
-<label for="url">Supabase project URL</label><input id="url" placeholder="https://project.supabase.co" autocomplete="off">
-<label for="key">Publishable/anon key (never service-role)</label><input id="key" type="password" autocomplete="off">
-<button id="connect">Connect</button><small>Connection stays in this page's memory; no key is saved.</small></section>
+<section id="setup"><h2>Secure sign-in</h2><p>Continue to sign in with your Hub Auth account.</p><button id="connect">Continue</button></section>
 <section id="login" hidden><h2>Member sign in</h2>
 <label for="username">Username</label><input id="username" autocomplete="username">
 <label for="password">Password</label><input id="password" type="password" autocomplete="current-password">
@@ -42,7 +39,9 @@ small{color:#536176}#status{white-space:pre-wrap;padding:12px;background:#e9eff8
 (function(){
 "use strict";
 var client=null;
-try { var saved=JSON.parse(localStorage.getItem('platformUpdates.cfg.v1')||'null'); if(saved && saved.url && saved.key){ document.getElementById('url').value=saved.url; document.getElementById('key').value=saved.key; } } catch(e) {}
+var projectUrl='https://pzvpcydroidhycnksrnt.supabase.co';
+var publishableKey='';
+try { var saved=JSON.parse(localStorage.getItem('platformUpdates.cfg.v1')||'null'); if(saved && saved.url===projectUrl && saved.key) publishableKey=saved.key; } catch(e) {}
 var $=function(id){return document.getElementById(id)};
 function show(id,on){$(id).hidden=!on}
 function status(message){$('status').textContent=message}
@@ -52,7 +51,8 @@ async function run(button,work){
   finally{button.disabled=false}
 }
 $('connect').onclick=function(){run(this,async function(){
-  client=createHubSecureClient($('url').value.trim(),$('key').value.trim());
+  if(!publishableKey) throw Error('Hub connection is not configured on this device. Open the existing Hub once on this browser, then return here.');
+  client=createHubSecureClient(projectUrl,publishableKey);
   show('login',true);status('Adapter initialized. No request sent yet.');
 })};
 $('signin').onclick=function(){run(this,async function(){
