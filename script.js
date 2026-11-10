@@ -53,6 +53,19 @@ var AUTH = (function(){
     return ('0000000'+h.toString(16)).slice(-8);
   }
 
+  /* ---- secure migration adapter (opt-in; legacy remains unchanged) ---- */
+  // This branch can load the staged adapter without activating it. Activation
+  // requires verified server policies and a coordinated deployment.
+  var secureClient = null;
+  function enableSecureClient(){
+    if (!window.createHubSecureClient) throw new Error('Secure client module not loaded.');
+    if (!isConfigured()) throw new Error('Supabase configuration missing.');
+    secureClient = window.createHubSecureClient(cfg.url, cfg.key);
+    return secureClient;
+  }
+  function getSecureClient(){ return secureClient; }
+  function disableSecureClient(){ secureClient = null; }
+
   /* ---- REST helpers ---- */
   function base(){ return cfg.url.replace(/\/+$/,''); }
   function restHeaders(extra){
@@ -239,7 +252,8 @@ var AUTH = (function(){
     login:login, logout:logout, isAdmin:isAdmin,
     pull:pull, push:push, bootstrap:bootstrap, blankRemote:blankRemote,
     createUser:createUser, updateUser:updateUser, resetPassword:resetPassword, deleteUser:deleteUser, setRole:setRole, listUsers:listUsers,
-    pullData:pullData, pushData:pushData, getRemote:function(){ return remote; }
+    pullData:pullData, pushData:pushData, getRemote:function(){ return remote; },
+    enableSecureClient:enableSecureClient, getSecureClient:getSecureClient, disableSecureClient:disableSecureClient
   };
 })();
 try { window.AUTH = AUTH; } catch(e){}
