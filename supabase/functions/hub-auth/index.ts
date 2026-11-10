@@ -100,6 +100,53 @@ Deno.serve(async (request) => {
   if (!(await isAdmin(current.user.id)))
     return reply(403, { error: "Admin access required" });
 
+  if (action === "list_users") {
+    const { data: members, error: membersError } = await admin.from("hub_members").select("user_id,role");
+    if (membersError) return reply(500, { error: "Unable to load members" });
+    const membership = new Map((members || []).map(m => [m.user_id, m.role]));
+    const accounts: { username: string; role: string; must_change_password: boolean }[] = [];
+    for (let page = 1; page <= 50; page++) {
+      const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 100 });
+      if (error) return reply(500, { error: "Unable to list accounts" });
+      for (const u of data.users) {
+        const role = membership.get(u.id);
+        if (role && u.email?.endsWith("@users.invalid")) {
+          accounts.push({
+            username: u.email.slice(0, -"@users.invalid".length),
+            role,
+            must_change_password: u.app_metadata?.must_change_password !== false,
+          });
+        }
+      }
+      if (data.users.length < 100) break;
+    }
+    return reply(200, { users: accounts.sort((a,b) => a.username.localeCompare(b.username)) });
+  }
+
+  if (action === "set_role") {
+    if (!validUsername(body.username) || !["admin","member"].includes(String(body.role)))
+      return reply(400, { error: "Invalid account or role" });
+    const { data: members, error: membersError } = await admin.from("hub_members").select("user_id,role");
+    if (membersError) return reply(500, { error: "Unable to load members" });
+    let targetId: string | undefined;
+    for (let page = 1; page <= 50 && !targetId; page++) {
+      const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 100 });
+      if (error) return reply(500, { error: "Account lookup failed" });
+      targetId = data.users.find(u => u.email === internalEmail(body.username))?.id;
+      if (data.users.length < 100) break;
+    }
+    const target = members?.find(m => m.user_id === targetId);
+    if (!target) return reply(404, { error: "Account not found" });
+    if (targetId === current.user.id)
+      return reply(403, { error: "You cannot change your own administrator role" });
+    if (target.role === "admin" && body.role === "member" &&
+        members!.filter(m => m.role === "admin").length <= 1)
+      return reply(409, { error: "At least one administrator must remain" });
+    const { error } = await admin.from("hub_members").update({ role: body.role }).eq("user_id", targetId);
+    if (error) return reply(500, { error: "Unable to update role" });
+    return reply(200, { updated: true });
+  }
+
   if (action === "create_user") {
     if (!validUsername(body.username) || !validPassword(body.temporary_password) ||
         !["admin", "member"].includes(String(body.role)))
