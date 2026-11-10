@@ -5703,36 +5703,56 @@ function applyRoleVisibility(){
 function renderSecureMembersPane(wrap){
   var client=AUTH.getSecureClient();
   if (!client || !client.getSession() || client.getSession().role!=='admin'){
-    wrap.innerHTML='<div class="panel"><p class="panel__hint">Admin access required.</p></div>';
-    return;
+    wrap.innerHTML='<div class="panel"><p class="panel__hint">Admin access required.</p></div>';return;
   }
   wrap.innerHTML='<div class="panel"><div class="panel__head"><h2 class="panel__title">Member accounts</h2></div>'
-    +'<p class="panel__hint">No real email addresses required. Temporary passwords must be changed on first login. Passwords cannot be viewed after creation.</p>'
+    +'<p class="panel__hint">Create an account with a temporary password (12+ characters). Members must set their own password at first login.</p>'
     +'<div class="memberform">'
     +'<label class="authfield">Username<input id="secureMemberName" autocomplete="off" placeholder="newsletter_member01"></label>'
-    +'<label class="authfield">Temporary password (12+ characters)<input id="secureMemberPw" type="password" autocomplete="new-password"></label>'
+    +'<label class="authfield">Temporary password<input id="secureMemberPw" type="password" autocomplete="new-password"></label>'
     +'<label class="authfield">Role<select id="secureMemberRole"><option value="member">Member</option><option value="admin">Admin</option></select></label>'
-    +'<button type="button" class="btn" id="secureMemberCreate">Create account</button>'
+    +'<button type="button" class="btn" id="secureMemberCreate">Create account</button> '
     +'<button type="button" class="btn" id="secureMemberReset">Reset password</button>'
-    +'</div><div class="authcard__msg" id="secureMemberMsg"></div></div>';
+    +'</div><div class="authcard__msg" id="secureMemberMsg"></div></div>'
+    +'<div class="panel"><div class="panel__head"><h2 class="panel__title">Existing accounts</h2></div>'
+    +'<div id="secureMemberList">Loading accounts…</div></div>';
+  var msg=wrap.querySelector('#secureMemberMsg');
+  function loadMembers(){
+    return client.listUsers().then(function(result){
+      var list=wrap.querySelector('#secureMemberList');if(!list)return;
+      var users=Array.isArray(result.users)?result.users:[];
+      list.innerHTML=users.length?'<table class="data-table" style="width:100%"><thead><tr><th>Username</th><th>Role</th><th>Password</th><th>Action</th></tr></thead><tbody>'
+        +users.map(function(u){
+          return '<tr><td>'+esc(u.username)+'</td><td>'+esc(u.role)+'</td><td>'+(u.must_change_password?'Change required':'Set')+'</td>'
+            +'<td>'+(u.username===sessionPilotUsername?'Current account':'<button type="button" class="btn btn--sm" data-role-user="'+esc(u.username)+'" data-role-next="'+(u.role==='admin'?'member':'admin')+'">Make '+(u.role==='admin'?'member':'admin')+'</button>')+'</td></tr>';
+        }).join('')+'</tbody></table>':'No accounts found.';
+      list.querySelectorAll('[data-role-user]').forEach(function(button){
+        button.onclick=function(){
+          var username=this.getAttribute('data-role-user'),role=this.getAttribute('data-role-next');
+          if(!confirm('Change '+username+' to '+role+'?'))return;
+          this.disabled=true;
+          client.setRole(username,role).then(function(){msg.textContent='Role updated for '+username+'.';return loadMembers();})
+            .catch(function(e){msg.textContent=e.message||'Role update failed';button.disabled=false;});
+        };
+      });
+    }).catch(function(e){var list=wrap.querySelector('#secureMemberList');if(list)list.textContent='Could not load accounts: '+(e.message||e);});
+  }
   function run(action){
     var username=wrap.querySelector('#secureMemberName').value.trim().toLowerCase();
     var password=wrap.querySelector('#secureMemberPw').value;
     var role=wrap.querySelector('#secureMemberRole').value;
-    var message=wrap.querySelector('#secureMemberMsg');
-    var buttons=wrap.querySelectorAll('button');
+    var buttons=wrap.querySelectorAll('#secureMemberCreate,#secureMemberReset');
     buttons.forEach(function(b){b.disabled=true;});
-    var op=action==='create'
-      ?client.createUser(username,password,role)
-      :client.resetPassword(username,password);
+    var op=action==='create'?client.createUser(username,password,role):client.resetPassword(username,password);
     op.then(function(){
-      message.textContent=action==='create'?'Account created. Share temporary password privately.':'Password reset. Member must change it at next login.';
-      wrap.querySelector('#secureMemberPw').value='';
-    }).catch(function(e){message.textContent=e.message||'Operation failed';})
+      msg.textContent=action==='create'?'Account created. Share temporary password privately.':'Password reset. Member must change it at next login.';
+      wrap.querySelector('#secureMemberPw').value='';return loadMembers();
+    }).catch(function(e){msg.textContent=e.message||'Operation failed';})
       .finally(function(){buttons.forEach(function(b){b.disabled=false;});});
   }
   wrap.querySelector('#secureMemberCreate').onclick=function(){run('create');};
   wrap.querySelector('#secureMemberReset').onclick=function(){run('reset');};
+  loadMembers();
 }
 function renderMembersPane(wrap){
   if (AUTH.isSecureMode()) return renderSecureMembersPane(wrap);
