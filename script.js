@@ -299,7 +299,7 @@ var AUTH = (function(){
   return {
     loadCfg:loadCfg, saveCfg:saveCfg, clearCfg:clearCfg, isConfigured:isConfigured, getCfg:function(){ return cfg; },
     getImgbbKey:getImgbbKey, uploadImage:uploadImage,
-    loadSession:loadSession, getSession:function(){ return session; },
+    loadSession:loadSession, getSession:function(){ return secureMode ? (secureBridge && secureBridge.getSession() ? {username:window.__hubPilotUsername || 'member',role:secureBridge.getSession().role} : null) : session; },
     login:login, logout:logout, isAdmin:isAdmin,
     pull:pull, push:push, bootstrap:bootstrap, blankRemote:blankRemote,
     createUser:createUser, updateUser:updateUser, resetPassword:resetPassword, deleteUser:deleteUser, setRole:setRole, listUsers:listUsers,
@@ -5409,6 +5409,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
   // Gate 1: first-run setup (this device has no Supabase config yet).
   if (!AUTH.isConfigured()){
+    if (AUTH.isSecureMode()) { showGate('<div class="authcard"><h1>Secure pilot configuration missing</h1><p>Connect this device to the Supabase pilot project first. Production setup is not available in secure pilot mode.</p></div>'); return; }
     renderSetupGate();
     return;
   }
@@ -5600,6 +5601,7 @@ function renderSecureLoginGate(){
       }
       AUTH.activateSecureBridge();
       sessionPilotUsername = g.querySelector('#secureLoginUser').value.trim().toLowerCase();
+      window.__hubPilotUsername = sessionPilotUsername;
       bootApp();
     } catch(e){msg(e.message||'Sign in failed');}
     finally{btn.disabled=false;}
