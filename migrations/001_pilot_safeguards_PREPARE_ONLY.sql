@@ -41,7 +41,11 @@ as $$
 declare
   new_version bigint;
 begin
-  if (select auth.uid()) is null or coalesce((select auth.jwt() -> 'app_metadata' ->> 'must_change_password')::boolean, false) or not exists (
+  if (select auth.uid()) is null or exists (
+    select 1 from auth.users au
+    where au.id = (select auth.uid())
+      and coalesce((au.raw_app_meta_data ->> 'must_change_password')::boolean, true)
+  ) or not exists (
     select 1 from public.hub_members m
     where m.user_id = (select auth.uid())
       and m.role in ('admin', 'member')
