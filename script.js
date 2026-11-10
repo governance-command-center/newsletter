@@ -140,7 +140,7 @@ var AUTH = (function(){
 
   // Write the whole payload back (upsert the single row).
   function push(payload){
-    if (secureMode) return Promise.reject(new Error('Secure Hub preview is read-only; no shared changes were made.'));
+    if (secureMode) return secureBridge ? secureBridge.push(payload) : Promise.reject(new Error('Secure login required'));
     return fetch(base()+'/rest/v1/store', {
       method:'POST',
       headers: restHeaders({ 'Prefer':'resolution=merge-duplicates,return=minimal' }),
@@ -166,7 +166,7 @@ var AUTH = (function(){
   /* ---- image upload to Supabase Storage (public bucket) ---- */
   function getImgbbKey(){ return isConfigured() ? 'supabase' : ''; } // truthy when configured, so the picker uploads
   function uploadImage(dataUrl, name){
-    if (secureMode) return Promise.reject(new Error('Image upload is disabled in the secure preview until cutover.'));
+    if (secureMode) return secureBridge ? secureBridge.uploadImage(dataUrl,name) : Promise.reject(new Error('Secure login required'));
     if (!isConfigured()) return Promise.reject(new Error('Not configured.'));
     var comma = dataUrl.indexOf(',');
     var meta = dataUrl.slice(0, comma);
@@ -290,7 +290,7 @@ var AUTH = (function(){
   /* ---- shared data ---- */
   function pullData(){ return pull().then(function(r){ return { slides:r.slides, archives:r.archives, drafts:r.drafts }; }); }
   function pushData(slidesArr, archivesArr, draftsArr){
-    if (secureMode) return Promise.reject(new Error('Secure Hub preview is read-only; changes cannot be shared yet.'));
+    if (secureMode) return secureBridge ? secureBridge.pushData(slidesArr, archivesArr, draftsArr) : Promise.reject(new Error('Secure login required'));
     return pull().then(function(r){
       r.slides = Array.isArray(slidesArr)?slidesArr:r.slides;
       if (Array.isArray(archivesArr)) r.archives = archivesArr;
@@ -5584,7 +5584,7 @@ function renderSecureLoginGate(){
   var g = showGate(
     '<div class="authcard">'
     + '<h1 class="authcard__title">Merchandising Updates Hub</h1>'
-    + '<p class="authcard__lead">Secure Hub preview — browse the real dashboard and entries. Saving is temporarily disabled to protect existing data.</p>'
+    + '<p class="authcard__lead">Secure Hub pilot — authenticated saving enabled. Please use test entries only until final cutover.</p>'
     + '<label class="authfield">Username<input id="secureLoginUser" autocomplete="username"></label>'
     + '<label class="authfield">Password<input id="secureLoginPw" type="password" autocomplete="current-password"></label>'
     + '<div class="authcard__msg" id="secureLoginMsg"></div>'
