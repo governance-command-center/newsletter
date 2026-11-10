@@ -53,6 +53,68 @@ var AUTH = (function(){
     return ('0000000'+h.toString(16)).slice(-8);
   }
 
+  /* ---- secure migration adapter (opt-in; legacy remains unchanged) ---- */
+  // This branch can load the staged adapter without activating it. Activation
+  // requires verified server policies and a coordinated deployment.
+  var secureClient = null;
+  var secureMode = new URLSearchParams(window.location.search).get('secure_pilot') === '1';
+  var secureBridge = null;
+  function isSecureMode(){ return secureMode; }
+  function activateSecureBridge(){ secureBridge = securePilotBridge(); return secureBridge; }
+  function getSecureBridge(){ return secureBridge; }
+  function enableSecureClient(){
+    if (!window.createHubSecureClient) throw new Error('Secure client module not loaded.');
+    if (!isConfigured()) throw new Error('Supabase configuration missing.');
+    secureClient = window.createHubSecureClient(cfg.url, cfg.key);
+    return secureClient;
+  }
+  function getSecureClient(){ return secureClient; }
+  function disableSecureClient(){ secureClient = null; }
+  // Opt-in staging bridge: no changes to the production default login or writes.
+  // The pilot page can exercise the SAME Hub persistence contract without
+  // loading legacy password hashes into its authenticated browser session.
+  function securePilotBridge(){
+    var client = secureClient;
+    if (!client) throw new Error('Secure client is not initialized');
+    var lastRead = null;
+    return {
+      login: function(username, password){ return client.login(username,password); },
+      changePassword: function(oldPassword,newPassword){ return client.changePassword(oldPassword,newPassword); },
+      logout: function(){ client.logout(); lastRead=null; },
+      getSession: function(){ return client.getSession(); },
+      pull: function(){
+        return client.read().then(function(data){
+          lastRead = data;
+          return normalizeRemote(data);
+        });
+      },
+      push: function(data){
+        if (!lastRead) return Promise.reject(new Error('Read shared data before saving'));
+        return client.save(data).then(function(){
+          lastRead = structuredClone(data);
+          return true;
+        });
+      },
+      pullData: function(){
+        return this.pull().then(function(data){
+          return { slides:data.slides, archives:data.archives, drafts:data.drafts };
+        });
+      },
+      pushData: function(nextSlides,nextArchives,nextDrafts){
+        // Never re-read a newer version and then overwrite it with stale
+        // in-memory slides. The save must use the version last observed by
+        // this editor, so concurrent writers get a visible conflict.
+        if (!lastRead) return Promise.reject(new Error('Read shared data before saving'));
+        var data=structuredClone(lastRead);
+        if (Array.isArray(nextSlides)) data.slides=nextSlides;
+        if (Array.isArray(nextArchives)) data.archives=nextArchives;
+        if (Array.isArray(nextDrafts)) data.drafts=nextDrafts;
+        return this.push(data);
+      },
+      uploadImage: function(dataUrl,filename){ return client.uploadImage(dataUrl,filename); }
+    };
+  }
+
   /* ---- REST helpers ---- */
   function base(){ return cfg.url.replace(/\/+$/,''); }
   function restHeaders(extra){
@@ -63,6 +125,7 @@ var AUTH = (function(){
 
   // Read the single store row. Returns the normalized payload (empty if none).
   function pull(){
+    if (secureMode) return secureBridge ? secureBridge.pull() : Promise.reject(new Error('Secure login required'));
     return fetch(base()+'/rest/v1/store?id=eq.'+encodeURIComponent(STORE_ID)+'&select=data', {
       headers: restHeaders()
     }).then(function(r){
@@ -77,6 +140,7 @@ var AUTH = (function(){
 
   // Write the whole payload back (upsert the single row).
   function push(payload){
+    if (secureMode) return secureBridge ? secureBridge.push(payload) : Promise.reject(new Error('Secure login required'));
     return fetch(base()+'/rest/v1/store', {
       method:'POST',
       headers: restHeaders({ 'Prefer':'resolution=merge-duplicates,return=minimal' }),
@@ -102,6 +166,7 @@ var AUTH = (function(){
   /* ---- image upload to Supabase Storage (public bucket) ---- */
   function getImgbbKey(){ return isConfigured() ? 'supabase' : ''; } // truthy when configured, so the picker uploads
   function uploadImage(dataUrl, name){
+    if (secureMode) return secureBridge ? secureBridge.uploadImage(dataUrl,name) : Promise.reject(new Error('Secure login required'));
     if (!isConfigured()) return Promise.reject(new Error('Not configured.'));
     var comma = dataUrl.indexOf(',');
     var meta = dataUrl.slice(0, comma);
@@ -143,8 +208,9 @@ var AUTH = (function(){
       return session;
     });
   }
-  function logout(){ clearSession(); }
-  function isAdmin(){ return session && session.role==='admin'; }
+  function logout(){ if (secureMode && secureBridge) secureBridge.logout(); clearSession(); }
+  function isSecureAdmin(){ return secureBridge && secureBridge.getSession() && secureBridge.getSession().role === 'admin'; }
+  function isAdmin(){ return secureMode ? !!isSecureAdmin() : !!(session && session.role==='admin'); }
 
   /* ---- account management ---- */
   function createUser(username, pw, role, details){
@@ -235,11 +301,12 @@ var AUTH = (function(){
   return {
     loadCfg:loadCfg, saveCfg:saveCfg, clearCfg:clearCfg, isConfigured:isConfigured, getCfg:function(){ return cfg; },
     getImgbbKey:getImgbbKey, uploadImage:uploadImage,
-    loadSession:loadSession, getSession:function(){ return session; },
+    loadSession:loadSession, getSession:function(){ return secureMode ? (secureBridge && secureBridge.getSession() ? {username:window.__hubPilotUsername || 'member',role:secureBridge.getSession().role} : null) : session; },
     login:login, logout:logout, isAdmin:isAdmin,
     pull:pull, push:push, bootstrap:bootstrap, blankRemote:blankRemote,
     createUser:createUser, updateUser:updateUser, resetPassword:resetPassword, deleteUser:deleteUser, setRole:setRole, listUsers:listUsers,
-    pullData:pullData, pushData:pushData, getRemote:function(){ return remote; }
+    pullData:pullData, pushData:pushData, getRemote:function(){ return remote; },
+    enableSecureClient:enableSecureClient, getSecureClient:getSecureClient, disableSecureClient:disableSecureClient, securePilotBridge:securePilotBridge, isSecureMode:isSecureMode, activateSecureBridge:activateSecureBridge, getSecureBridge:getSecureBridge
   };
 })();
 try { window.AUTH = AUTH; } catch(e){}
@@ -347,6 +414,7 @@ var _syncPushChain = Promise.resolve();
 var _syncPending = false;
 function syncPush(){
   if (!(window.AUTH && AUTH.isConfigured())) return;
+  if (AUTH.isSecureMode() && !AUTH.getSecureBridge()) return;
   _syncPending = true;
   _syncPushChain = _syncPushChain.then(function(){
     if (!_syncPending) return;
@@ -356,7 +424,8 @@ function syncPush(){
       setSyncStatus('All changes saved and shared ✓', true);
     });
   }).catch(function(e){
-    setSyncStatus('Could not save to the shared store ('+(e && e.message ? e.message : 'network error')+'). Your change is live in this tab only until it saves.', false);
+    if (e && e.isConflict) _syncPending = false;
+    setSyncStatus((e && e.isConflict ? 'Save conflict: another member saved changes. Your changes remain in this browser. Export a backup before reloading; do not retry blindly. ' : 'Could not save to the shared store. Your change is live in this tab only until it saves. ')+(e && e.message ? e.message : 'network error'), false);
   });
 }
 
@@ -5338,13 +5407,16 @@ function initChrome(){
 document.addEventListener('DOMContentLoaded', function(){
   applyUrlParams();
   AUTH.loadCfg();
-  AUTH.loadSession();
+  if (!AUTH.isSecureMode()) AUTH.loadSession();
 
   // Gate 1: first-run setup (this device has no Supabase config yet).
   if (!AUTH.isConfigured()){
+    if (AUTH.isSecureMode()) { showGate('<div class="authcard"><h1>Secure pilot configuration missing</h1><p>Connect this device to the Supabase pilot project first. Production setup is not available in secure pilot mode.</p></div>'); return; }
     renderSetupGate();
     return;
   }
+  // Secure pilot never trusts the legacy browser session.
+  if (AUTH.isSecureMode()) { renderSecureLoginGate(); return; }
   // Gate 2: not logged in on this device.
   if (!AUTH.getSession()){
     renderLoginGate();
@@ -5505,6 +5577,54 @@ function renderSetupGate(){
 }
 
 /* ---- Login ---- */
+var sessionPilotUsername = '';
+function renderSecureLoginGate(){
+  var secure = AUTH.getSecureClient() || AUTH.enableSecureClient();
+  var g = showGate(
+    '<div class="authcard">'
+    + '<h1 class="authcard__title">Merchandising Updates Hub</h1>'
+    + '<p class="authcard__lead">Secure username sign in (pilot only).</p>'
+    + '<label class="authfield">Username<input id="secureLoginUser" autocomplete="username"></label>'
+    + '<label class="authfield">Password<input id="secureLoginPw" type="password" autocomplete="current-password"></label>'
+    + '<div class="authcard__msg" id="secureLoginMsg"></div>'
+    + '<button type="button" class="btn authcard__btn" id="secureLoginBtn">Sign in</button>'
+    + '</div>');
+  function msg(text){ g.querySelector('#secureLoginMsg').textContent=text; }
+  g.querySelector('#secureLoginBtn').onclick = async function(){
+    var btn=this;btn.disabled=true;
+    try {
+      var result=await secure.login(
+        g.querySelector('#secureLoginUser').value.trim().toLowerCase(),
+        g.querySelector('#secureLoginPw').value);
+      g.querySelector('#secureLoginPw').value='';
+      if (result.mustChangePassword) {
+        renderSecurePasswordChangeGate(secure);
+        return;
+      }
+      AUTH.activateSecureBridge();
+      sessionPilotUsername = g.querySelector('#secureLoginUser').value.trim().toLowerCase();
+      window.__hubPilotUsername = sessionPilotUsername;
+      bootApp();
+    } catch(e){msg(e.message||'Sign in failed');}
+    finally{btn.disabled=false;}
+  };
+}
+function renderSecurePasswordChangeGate(secure){
+  var g=showGate('<div class="authcard"><h1 class="authcard__title">Change temporary password</h1>'
+    + '<label class="authfield">Current password<input id="secureOldPw" type="password" autocomplete="current-password"></label>'
+    + '<label class="authfield">New password (12+ characters)<input id="secureNewPw" type="password" autocomplete="new-password"></label>'
+    + '<div class="authcard__msg" id="secureChangeMsg"></div>'
+    + '<button type="button" class="btn authcard__btn" id="secureChangeBtn">Change password</button></div>');
+  g.querySelector('#secureChangeBtn').onclick=async function(){
+    var btn=this;btn.disabled=true;
+    try{
+      await secure.changePassword(g.querySelector('#secureOldPw').value,
+        g.querySelector('#secureNewPw').value);
+      renderSecureLoginGate();
+    }catch(e){g.querySelector('#secureChangeMsg').textContent=e.message||'Password change failed';}
+    finally{btn.disabled=false;}
+  };
+}
 function renderLoginGate(){
   var cfg = AUTH.getCfg();
   var g = showGate(
@@ -5562,7 +5682,7 @@ function applyRoleVisibility(){
   // Session bar (who am I + logout) in the sidebar footer.
   var foot = document.querySelector('.sidebar__foot');
   if (foot){
-    var sess = AUTH.getSession();
+    var sess = AUTH.isSecureMode() ? {username:sessionPilotUsername} : AUTH.getSession();
     foot.innerHTML =
       '<div class="sessionbar">'
         + '<div class="sessionbar__who">Signed in as <strong>'+esc(sess ? sess.username : '?')+'</strong>'
@@ -5571,7 +5691,7 @@ function applyRoleVisibility(){
       + '</div>'
       + '<div class="syncstatus" id="syncStatus"></div>';
     var lo = foot.querySelector('#logoutBtn');
-    if (lo) lo.addEventListener('click', function(){ AUTH.logout(); renderLoginGate(); });
+    if (lo) lo.addEventListener('click', function(){ AUTH.logout(); if (AUTH.isSecureMode()) renderSecureLoginGate(); else renderLoginGate(); });
   }
 }
 
@@ -5579,7 +5699,42 @@ function applyRoleVisibility(){
    MEMBERS PANE  (admin only): create users, reset passwords,
    change roles, remove users.
    ============================================================ */
+function renderSecureMembersPane(wrap){
+  var client=AUTH.getSecureClient();
+  if (!client || !client.getSession() || client.getSession().role!=='admin'){
+    wrap.innerHTML='<div class="panel"><p class="panel__hint">Admin access required.</p></div>';
+    return;
+  }
+  wrap.innerHTML='<div class="panel"><div class="panel__head"><h2 class="panel__title">Member accounts</h2></div>'
+    +'<p class="panel__hint">No real email addresses required. Temporary passwords must be changed on first login. Passwords cannot be viewed after creation.</p>'
+    +'<div class="memberform">'
+    +'<label class="authfield">Username<input id="secureMemberName" autocomplete="off" placeholder="newsletter_member01"></label>'
+    +'<label class="authfield">Temporary password (12+ characters)<input id="secureMemberPw" type="password" autocomplete="new-password"></label>'
+    +'<label class="authfield">Role<select id="secureMemberRole"><option value="member">Member</option><option value="admin">Admin</option></select></label>'
+    +'<button type="button" class="btn" id="secureMemberCreate">Create account</button>'
+    +'<button type="button" class="btn" id="secureMemberReset">Reset password</button>'
+    +'</div><div class="authcard__msg" id="secureMemberMsg"></div></div>';
+  function run(action){
+    var username=wrap.querySelector('#secureMemberName').value.trim().toLowerCase();
+    var password=wrap.querySelector('#secureMemberPw').value;
+    var role=wrap.querySelector('#secureMemberRole').value;
+    var message=wrap.querySelector('#secureMemberMsg');
+    var buttons=wrap.querySelectorAll('button');
+    buttons.forEach(function(b){b.disabled=true;});
+    var op=action==='create'
+      ?client.createUser(username,password,role)
+      :client.resetPassword(username,password);
+    op.then(function(){
+      message.textContent=action==='create'?'Account created. Share temporary password privately.':'Password reset. Member must change it at next login.';
+      wrap.querySelector('#secureMemberPw').value='';
+    }).catch(function(e){message.textContent=e.message||'Operation failed';})
+      .finally(function(){buttons.forEach(function(b){b.disabled=false;});});
+  }
+  wrap.querySelector('#secureMemberCreate').onclick=function(){run('create');};
+  wrap.querySelector('#secureMemberReset').onclick=function(){run('reset');};
+}
 function renderMembersPane(wrap){
+  if (AUTH.isSecureMode()) return renderSecureMembersPane(wrap);
   if (!AUTH.isAdmin()){
     wrap.innerHTML = '<div class="panel"><p class="panel__hint">This section is for admins only.</p></div>';
     return;
