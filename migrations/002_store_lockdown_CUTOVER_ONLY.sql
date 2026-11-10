@@ -12,6 +12,19 @@ drop policy if exists "store_write" on public.store;
 revoke all on public.store from anon, authenticated;
 grant select on public.store to authenticated;
 
+-- Authenticated role must be able to evaluate the current password-change
+-- flag without exposing auth.users directly. Use a SECURITY DEFINER helper.
+create or replace function public.hub_password_change_required()
+returns boolean language sql stable security definer set search_path = ''
+as $
+  select coalesce((
+    select (au.raw_app_meta_data ->> 'must_change_password')::boolean
+    from auth.users au where au.id = (select auth.uid())
+  ), true);
+$;
+revoke all on function public.hub_password_change_required() from public, anon;
+grant execute on function public.hub_password_change_required() to authenticated;
+
 create policy store_member_read on public.store
 for select to authenticated
 using (
@@ -19,10 +32,7 @@ using (
     select 1 from public.hub_members m
     where m.user_id = (select auth.uid())
   )
-  and not coalesce(
-    ((select auth.jwt()) -> 'app_metadata' ->> 'must_change_password')::boolean,
-    false
-  )
+  and not (select public.hub_password_change_required())
 );
 commit;
 
