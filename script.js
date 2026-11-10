@@ -3068,9 +3068,8 @@ function approvedPrintHtml(list){
 function pdfImageData(url){
   return new Promise(function(resolve){
     if(!url){resolve(null);return;}
-    if(/^data:image\/(png|jpeg|jpg|webp);base64,/i.test(url)){resolve(url);return;}
     var img=new Image();
-    img.crossOrigin='anonymous';
+    if(!url.startsWith('data:'))img.crossOrigin='anonymous';
     img.onload=function(){
       try{
         var canvas=document.createElement('canvas'),scale=Math.min(1,1400/Math.max(img.naturalWidth,img.naturalHeight));
