@@ -24,6 +24,7 @@ small{color:#536176}#status{white-space:pre-wrap;padding:12px;background:#e9eff8
 <label for="password">Password</label><input id="password" type="password" autocomplete="current-password">
 <button id="signin">Sign in</button></section>
 <section id="change" hidden><h2>Set your own password</h2><p>Temporary password must be changed before accessing the Hub.</p>
+<label for="currentpass">Current temporary password</label><input id="currentpass" type="password" autocomplete="current-password">
 <label for="newpass">New password (12–128 characters)</label><input id="newpass" type="password" autocomplete="new-password">
 <button id="changebtn">Change password and sign in again</button></section>
 <section id="member" hidden><h2>Authenticated test session</h2>
@@ -63,7 +64,8 @@ $('signin').onclick=function(){run(this,async function(){
   status(result.mustChangePassword?'Temporary password: change required.':'Signed in as '+result.role);
 })};
 $('changebtn').onclick=function(){run(this,async function(){
-  await client.changePassword($('newpass').value);
+  await client.changePassword($('currentpass').value,$('newpass').value);
+  $('currentpass').value='';
   $('newpass').value='';show('change',false);show('login',true);
   status('Password updated. Sign in again with your new password.');
 })};
