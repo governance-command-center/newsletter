@@ -127,6 +127,10 @@
         return action("create_user", { username: username,
           temporary_password: temporaryPassword, role: role }, await token());
       },
+      listUsers: async function () { return action("list_users", {}, await token()); },
+      setRole: async function (username, role) {
+        return action("set_role", { username: username, role: role }, await token());
+      },
       resetPassword: async function (username, temporaryPassword) {
         return action("reset_password", { username: username,
           temporary_password: temporaryPassword }, await token());
