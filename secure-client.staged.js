@@ -33,6 +33,7 @@
     }
     async function login(username, password) {
       session = await action("login", { username: username, password: password });
+      session.expires_at = Math.floor(Date.now() / 1000) + (session.expires_in || 3600);
       version = null; payload = null;
       return { role: session.role, mustChangePassword: session.must_change_password };
     }
@@ -45,6 +46,9 @@
       session.access_token = next.access_token;
       session.refresh_token = next.refresh_token;
       session.expires_at = Math.floor(Date.now() / 1000) + next.expires_in;
+      if (next.user && next.user.app_metadata) {
+        session.must_change_password = next.user.app_metadata.must_change_password === true;
+      }
       return session;
     }
     async function token() {
