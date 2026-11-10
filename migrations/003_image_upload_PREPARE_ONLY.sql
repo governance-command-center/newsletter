@@ -1,7 +1,7 @@
 -- Image upload cutover — REVIEW ONLY, DO NOT RUN ON PRODUCTION.
 -- Existing bucket: entry-images. Public READ remains allowed for images
 -- embedded in published public newsletters; WRITE requires signed-in members.
--- Prerequisites: new browser uploader sends user access token, verified
+-- Prerequisites: migration 002 helper exists; new browser uploader sends user access token, verified
 -- membership/first-login enforcement, and old public policies inventoried.
 --
 -- NOTE: storage.objects policies are shared across buckets. Do not remove
@@ -19,10 +19,7 @@ with check (
     select 1 from public.hub_members m
     where m.user_id = (select auth.uid())
   )
-  and not coalesce(
-    ((select auth.jwt()) -> 'app_metadata' ->> 'must_change_password')::boolean,
-    false
-  )
+  and not (select public.hub_password_change_required())
 );
 
 -- No authenticated UPDATE/DELETE policy: filenames are unique and
