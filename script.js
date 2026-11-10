@@ -36,7 +36,7 @@ var AUTH = (function(){
   var remote = null;   // {users:{}, slides:[], archives:[]}
 
   /* ---- config (this device only) ---- */
-  function loadCfg(){ try { cfg = JSON.parse(localStorage.getItem(CFG_KEY)||'null'); } catch(e){ cfg=null; } return cfg; }
+  function loadCfg(){ cfg = {url:'https://pzvpcydroidhycnksrnt.supabase.co', key:'sb_publishable_Z0QsdZFdXpTY3jfTTn6JlA_tEYkkmpp'}; return cfg; }
   function saveCfg(c){ cfg=c; try { localStorage.setItem(CFG_KEY, JSON.stringify(c)); } catch(e){} }
   function clearCfg(){ cfg=null; try { localStorage.removeItem(CFG_KEY); } catch(e){} }
   function isConfigured(){ return !!(cfg && cfg.url && cfg.key); }
@@ -57,7 +57,7 @@ var AUTH = (function(){
   // This branch can load the staged adapter without activating it. Activation
   // requires verified server policies and a coordinated deployment.
   var secureClient = null;
-  var secureMode = new URLSearchParams(window.location.search).get('secure_pilot') === '1';
+  var secureMode = true; // Supabase Auth is the only supported login after cutover.
   var secureBridge = null;
   function isSecureMode(){ return secureMode; }
   function activateSecureBridge(){ secureBridge = securePilotBridge(); return secureBridge; }
@@ -5584,7 +5584,7 @@ function renderSecureLoginGate(){
   var g = showGate(
     '<div class="authcard">'
     + '<h1 class="authcard__title">Merchandising Updates Hub</h1>'
-    + '<p class="authcard__lead">Secure Hub pilot — authenticated saving enabled. Please use test entries only until final cutover.</p>'
+    + '<p class="authcard__lead">Sign in with your Hub username and password.</p>'
     + '<label class="authfield">Username<input id="secureLoginUser" autocomplete="username"></label>'
     + '<label class="authfield">Password<input id="secureLoginPw" type="password" autocomplete="current-password"></label>'
     + '<div class="authcard__msg" id="secureLoginMsg"></div>'
