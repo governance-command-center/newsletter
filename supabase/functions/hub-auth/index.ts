@@ -31,7 +31,9 @@ async function actor(request: Request) {
   if (!token) return null;
   const { data, error } = await admin.auth.getUser(token);
   if (error || !data.user) return null;
-  return { user: data.user, token };
+  const { data: fresh, error: freshError } = await admin.auth.admin.getUserById(data.user.id);
+  if (freshError || !fresh.user) return null;
+  return { user: fresh.user, token };
 }
 async function isAdmin(userId: string) {
   const { data, error } = await admin.from("hub_members").select("role")
@@ -65,7 +67,7 @@ Deno.serve(async (request) => {
       access_token: data.session.access_token,
       refresh_token: data.session.refresh_token,
       expires_in: data.session.expires_in,
-      must_change_password: data.user.app_metadata?.must_change_password === true,
+      must_change_password: (await admin.auth.admin.getUserById(data.user.id)).data.user?.app_metadata?.must_change_password !== false,
       role: membership.role,
     });
   }
