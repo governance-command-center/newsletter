@@ -5500,7 +5500,18 @@ document.addEventListener('DOMContentLoaded', function(){
     return;
   }
   // Secure pilot never trusts the legacy browser session.
-  if (AUTH.isSecureMode()) { renderSecureLoginGate(); return; }
+  if (AUTH.isSecureMode()) {
+    var client=AUTH.getSecureClient() || AUTH.enableSecureClient();
+    client.restoreSession().then(function(sess){
+      if(sess && !sess.mustChangePassword){
+        sessionPilotUsername=sess.username;
+        window.__hubPilotUsername=sessionPilotUsername;
+        AUTH.activateSecureBridge();
+        bootApp();
+      }else renderSecureLoginGate();
+    }).catch(function(){renderSecureLoginGate();});
+    return;
+  }
   // Gate 2: not logged in on this device.
   if (!AUTH.getSession()){
     renderLoginGate();
