@@ -2985,8 +2985,18 @@ function approvedGroups(list){
 }
 function approvedLinks(s){
   var m=entryLinks(s),r=entryRegions(s),out=[];
-  r.forEach(function(reg){if(m[reg]&&!out.some(function(v){return v.url===m[reg];}))out.push({region:reg,url:m[reg]});});
-  if(!out.length&&s.link)out.push({region:'',url:s.link});return out;
+  function valid(url){
+    if(typeof url!=='string')return false;
+    url=url.trim();
+    if(!/^https?:\/\//i.test(url))return false;
+    try{var parsed=new URL(url);return !!parsed.hostname&&parsed.hostname.indexOf('.')!==-1;}catch(e){return false;}
+  }
+  r.forEach(function(reg){
+    var url=m[reg];
+    if(valid(url)&&!out.some(function(v){return v.url===url;}))out.push({region:reg,url:url.trim()});
+  });
+  if(!out.length&&valid(s.link))out.push({region:'',url:s.link.trim()});
+  return out;
 }
 function approvedText(s){
   return (s.body||[]).map(function(b){
