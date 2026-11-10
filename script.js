@@ -666,7 +666,7 @@ function coverageMultiControl(list,kind,container,countEl){
   var keys=Object.keys(groups).sort(function(a,b){return b.localeCompare(a);});
   Array.from(chosen).forEach(function(key){if(!groups[key])chosen.delete(key);});
   container.innerHTML='<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px"><label style="font-weight:600"><input type="checkbox" data-coverage-all '+(!chosen.size?'checked':'')+'> All coverage periods</label><span style="font-size:12px;color:#60738b">Or select multiple periods below</span></div>'
-    +'<div style="display:flex;flex-wrap:wrap;gap:8px">'+keys.map(function(key){var g=groups[key];return '<label style="display:inline-flex;align-items:center;gap:5px;padding:7px 10px;border:1px solid #d4dfec;border-radius:7px;background:#f8fbff;font-size:12px"><input type="checkbox" data-coverage-key="'+esc(key)+'" '+(chosen.has(key)?'checked':'')+'>'+esc(g.label)+' ('+g.count+')</label>';}).join('')+'</div>';
+    +'<div style="display:flex;flex-wrap:wrap;gap:8px;max-height:160px;overflow-y:auto;padding:4px;border:1px solid #e3eaf2;border-radius:7px">'+keys.map(function(key){var g=groups[key];return '<label style="display:inline-flex;align-items:center;gap:5px;padding:7px 10px;border:1px solid #d4dfec;border-radius:7px;background:#f8fbff;font-size:12px"><input type="checkbox" data-coverage-key="'+esc(key)+'" '+(chosen.has(key)?'checked':'')+'>'+esc(g.label)+' ('+g.count+')</label>';}).join('')+'</div>';
   var n=coverageMultiFilter(list,kind).length;
   if(countEl)countEl.textContent=n+' update'+(n===1?'':'s')+(kind==='export'?' will be exported':' will be included');
   var all=container.querySelector('[data-coverage-all]');
