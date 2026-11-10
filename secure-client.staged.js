@@ -9,6 +9,25 @@
     var key = String(publishableKey || "");
     if (!/^https:\/\//.test(base) || !key) throw new Error("Supabase URL and publishable key required");
     var session = null, version = null;
+    var SESSION_KEY = 'merchHub.secureSession.v1';
+    function persistSession() {
+      try { if(session) sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+        else sessionStorage.removeItem(SESSION_KEY); } catch(e) { /* storage may be disabled */ }
+    }
+    async function restoreSession() {
+      var stored;
+      try { stored = JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null'); } catch(e) { stored = null; }
+      if(!stored || !stored.refresh_token || !stored.access_token) return null;
+      session = stored;
+      try {
+        // Refresh with the server rather than trusting a locally cached role.
+        await refresh();
+        if(session.must_change_password){ logout(); return null; }
+        return getSession();
+      } catch(e) { logout(); return null; }
+    }
+    function getSession(){ return session ? { role: session.role,
+      mustChangePassword: session.must_change_password, username: session.username || '' } : null; }
     var payload = null;
     function headers(token) {
       return { apikey: key, Authorization: "Bearer " + (token || key),
@@ -33,8 +52,10 @@
     }
     async function login(username, password) {
       session = await action("login", { username: username, password: password });
+      session.username = String(username || "").trim().toLowerCase();
       session.expires_at = Math.floor(Date.now() / 1000) + (session.expires_in || 3600);
       version = null; payload = null;
+      if(!session.must_change_password) persistSession();
       return { role: session.role, mustChangePassword: session.must_change_password };
     }
     async function refresh() {
@@ -49,6 +70,7 @@
       if (next.user && next.user.app_metadata) {
         session.must_change_password = next.user.app_metadata.must_change_password === true;
       }
+      persistSession();
       return session;
     }
     async function token() {
@@ -64,7 +86,7 @@
       logout();
       return { reloginRequired: true };
     }
-    function logout() { session = null; version = null; payload = null; }
+    function logout() { session = null; version = null; payload = null; persistSession(); }
     async function read() {
       var accessToken = await token();
       var rows = await request(base + "/rest/v1/store?id=eq.main&select=data,version", {
@@ -121,7 +143,7 @@
       return base + "/storage/v1/object/public/entry-images/" + encodeURIComponent(path);
     }
     return {
-      login: login, logout: logout, refresh: refresh, changePassword: changePassword,
+      login: login, logout: logout, refresh: refresh, restoreSession: restoreSession, changePassword: changePassword,
       read: read, save: save, uploadImage: uploadImage,
       createUser: async function (username, temporaryPassword, role) {
         return action("create_user", { username: username,
@@ -135,8 +157,7 @@
         return action("reset_password", { username: username,
           temporary_password: temporaryPassword }, await token());
       },
-      getSession: function () { return session ? { role: session.role,
-        mustChangePassword: session.must_change_password } : null; }
+      getSession: getSession
     };
   }
   global.createHubSecureClient = createHubSecureClient;
