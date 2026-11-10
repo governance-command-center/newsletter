@@ -5519,6 +5519,52 @@ function renderSetupGate(){
 }
 
 /* ---- Login ---- */
+function renderSecureLoginGate(){
+  var secure = AUTH.getSecureClient() || AUTH.enableSecureClient();
+  var g = showGate(
+    '<div class="authcard">'
+    + '<h1 class="authcard__title">Merchandising Updates Hub</h1>'
+    + '<p class="authcard__lead">Secure username sign in (pilot only).</p>'
+    + '<label class="authfield">Username<input id="secureLoginUser" autocomplete="username"></label>'
+    + '<label class="authfield">Password<input id="secureLoginPw" type="password" autocomplete="current-password"></label>'
+    + '<div class="authcard__msg" id="secureLoginMsg"></div>'
+    + '<button type="button" class="btn authcard__btn" id="secureLoginBtn">Sign in</button>'
+    + '</div>');
+  function msg(text){ g.querySelector('#secureLoginMsg').textContent=text; }
+  g.querySelector('#secureLoginBtn').onclick = async function(){
+    var btn=this;btn.disabled=true;
+    try {
+      var result=await secure.login(
+        g.querySelector('#secureLoginUser').value.trim().toLowerCase(),
+        g.querySelector('#secureLoginPw').value);
+      g.querySelector('#secureLoginPw').value='';
+      if (result.mustChangePassword) {
+        renderSecurePasswordChangeGate(secure);
+        return;
+      }
+      // This pilot does not enter bootApp: the existing app still uses
+      // legacy pull/push and must not be presented as secured.
+      msg('Authenticated as '+result.role+'. Full Hub cutover is not enabled yet.');
+    } catch(e){msg(e.message||'Sign in failed');}
+    finally{btn.disabled=false;}
+  };
+}
+function renderSecurePasswordChangeGate(secure){
+  var g=showGate('<div class="authcard"><h1 class="authcard__title">Change temporary password</h1>'
+    + '<label class="authfield">Current password<input id="secureOldPw" type="password" autocomplete="current-password"></label>'
+    + '<label class="authfield">New password (12+ characters)<input id="secureNewPw" type="password" autocomplete="new-password"></label>'
+    + '<div class="authcard__msg" id="secureChangeMsg"></div>'
+    + '<button type="button" class="btn authcard__btn" id="secureChangeBtn">Change password</button></div>');
+  g.querySelector('#secureChangeBtn').onclick=async function(){
+    var btn=this;btn.disabled=true;
+    try{
+      await secure.changePassword(g.querySelector('#secureOldPw').value,
+        g.querySelector('#secureNewPw').value);
+      renderSecureLoginGate();
+    }catch(e){g.querySelector('#secureChangeMsg').textContent=e.message||'Password change failed';}
+    finally{btn.disabled=false;}
+  };
+}
 function renderLoginGate(){
   var cfg = AUTH.getCfg();
   var g = showGate(
