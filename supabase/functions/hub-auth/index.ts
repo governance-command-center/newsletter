@@ -95,7 +95,7 @@ Deno.serve(async (request) => {
     return reply(200, { changed: true, relogin_required: true });
   }
 
-  if (current.user.app_metadata?.must_change_password === true)
+  if (current.user.app_metadata?.must_change_password !== false)
     return reply(403, { error: "Change temporary password first" });
   if (!(await isAdmin(current.user.id)))
     return reply(403, { error: "Admin access required" });
