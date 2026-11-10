@@ -2183,7 +2183,7 @@ function exportPdf(listArg, labelArg){
   var jsPDFCtor = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
   if (jsPDFCtor){
     try {
-      approvedPdfVector(list, labelArg, jsPDFCtor);
+      approvedPdfVector(list, labelArg, jsPDFCtor).catch(function(e){setStatus('PDF export failed: '+(e&&e.message||e),false);});
       return;
     } catch (e){
       setStatus('Vector PDF failed ('+(e && e.message ? e.message : 'error')+') — falling back to the print dialog.', false);
@@ -3063,44 +3063,100 @@ function approvedPrintHtml(list){
   });
   return html+'</div>';
 }
-function approvedPdfVector(list,label,jsPDFCtor){
-  var doc=new jsPDFCtor({unit:'pt',format:'a4',compress:true}),W=doc.internal.pageSize.getWidth(),H=doc.internal.pageSize.getHeight(),margin=48,max=W-2*margin,y=46;
-  function next(h){if(y+h>H-45){doc.addPage();y=45;}}
-  function draw(text,size,bold,color,leading){
+/* Resolve remote Storage images to embeddable JPEGs before generating the PDF.
+   jsPDF cannot reliably load an HTTP URL directly in getImageProperties(). */
+function pdfImageData(url){
+  return new Promise(function(resolve){
+    if(!url){resolve(null);return;}
+    if(/^data:image\/(png|jpeg|jpg|webp);base64,/i.test(url)){resolve(url);return;}
+    var img=new Image();
+    img.crossOrigin='anonymous';
+    img.onload=function(){
+      try{
+        var canvas=document.createElement('canvas'),scale=Math.min(1,1400/Math.max(img.naturalWidth,img.naturalHeight));
+        canvas.width=Math.max(1,Math.round(img.naturalWidth*scale));
+        canvas.height=Math.max(1,Math.round(img.naturalHeight*scale));
+        canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
+        resolve(canvas.toDataURL('image/jpeg',0.88));
+      }catch(e){resolve(null);}
+    };
+    img.onerror=function(){resolve(null);};
+    img.src=url;
+  });
+}
+async function approvedPdfVector(list,label,jsPDFCtor){
+  var doc=new jsPDFCtor({unit:'pt',format:'a4',compress:true});
+  var W=doc.internal.pageSize.getWidth(),H=doc.internal.pageSize.getHeight(),margin=46,max=W-2*margin,y=46,missing=0;
+  function next(h){if(y+h>H-48){doc.addPage();y=48;}}
+  function draw(value,size,bold,color,leading,x,width){
+    var left=x===undefined?margin:x,available=width||max;
     doc.setFont('helvetica',bold?'bold':'normal');doc.setFontSize(size);
     doc.setTextColor.apply(doc,color||[30,50,70]);
-    var lines=doc.splitTextToSize(String(text||'').replace(/[^\x20-\x7e\n]/g,' ').replace(/\s+/g,' ').trim(),max);
-    lines.forEach(function(line){next(leading||size*1.55);doc.text(line,margin,y);y+=leading||size*1.55;});
+    var lines=doc.splitTextToSize(String(value||'').replace(/[^\x20-\x7e\n]/g,' ').replace(/\s+/g,' ').trim(),available);
+    lines.forEach(function(line){next(leading||size*1.55);doc.text(line,left,y);y+=leading||size*1.55;});
   }
-  // Match the approved email's editorial header in the generated PDF.
-  doc.setFillColor(16,43,76);doc.rect(0,0,W,154,'F');
+  doc.setFillColor(16,43,76);doc.rect(0,0,W,150,'F');
   doc.setFillColor(39,195,216);doc.rect(0,0,W,4,'F');
   doc.setFont('helvetica','bold');doc.setFontSize(10);doc.setTextColor(158,217,230);
   doc.text('MERCHANDISING NEWSLETTER',margin,42);
   doc.setFontSize(21);doc.setTextColor(255,255,255);
-  doc.text('Marketplace Updates at a Glance',margin,79);
+  doc.text('Marketplace Updates at a Glance',margin,78);
   doc.setFont('helvetica','normal');doc.setFontSize(11);doc.setTextColor(200,220,233);
-  doc.text(periodCoveredLabel(list),margin,108);
-  y=184;
+  doc.text(periodCoveredLabel(list),margin,107);
+  y=175;
   var grouped=approvedGroups(list);
-  grouped.platforms.forEach(function(p){
-    next(45);draw(p==='Tiktok'?'TikTok':p,17,true,[20,43,70],25);y+=7;
-    approvedRegions(grouped.groups[p]).forEach(function(reg){
-      next(32);draw(approvedRegion(reg),12,true,[8,126,152],20);y+=3;
-      grouped.groups[p][reg].forEach(function(s,i){
-        next(44);draw(String(i+1).padStart(2,'0')+'. '+s.title,11,true,[20,43,70],17);y+=4;
-        draw(approvedText(s),9.5,false,[75,96,113],15);
-        var links=approvedLinks(s);
-        links.forEach(function(l){next(25);doc.setFontSize(10);doc.setTextColor(8,130,152);doc.textWithLink((links.length>1?approvedRegion(l.region)+' - ':'')+'Official source',margin,y+7,{url:l.url});y+=23;});
-        if(!links.length)approvedImages(s).forEach(function(url){
-          try{var info=doc.getImageProperties(url),w=Math.min(max-25,info.width),h=w*info.height/info.width;if(h>290){w*=290/h;h=290;}next(h+18);doc.addImage(url,info.fileType||'PNG',(W-w)/2,y,w,h);y+=h+14;}catch(e){}
+  next(60);doc.setFillColor(234,248,252);doc.roundedRect(margin,y,max,51,5,5,'F');
+  doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(52,125,143);doc.text('AT A GLANCE',margin+13,y+17);
+  doc.setFontSize(12);doc.setTextColor(16,43,76);
+  doc.text(grouped.platforms.length+' platforms  |  '+list.length+' updates  |  Regional coverage',margin+13,y+36);y+=72;
+  for(var pi=0;pi<grouped.platforms.length;pi++){
+    var p=grouped.platforms[pi],regs=approvedRegions(grouped.groups[p]);
+    var count=regs.reduce(function(n,r){return n+grouped.groups[p][r].length;},0);
+    next(67);
+    doc.setFillColor(16,43,76);doc.roundedRect(margin,y,max,47,4,4,'F');
+    doc.setFillColor(237,112,58);doc.rect(margin,y,5,47,'F');
+    doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(179,205,221);
+    doc.text('PLATFORM '+String(pi+1).padStart(2,'0'),margin+17,y+15);
+    doc.setFontSize(17);doc.setTextColor(255,255,255);
+    doc.text(p==='Tiktok'?'TikTok':p,margin+17,y+35);
+    doc.setFontSize(9);doc.setTextColor(179,205,221);
+    doc.text(count+' updates',W-margin-14,y+29,{align:'right'});y+=62;
+    for(var ri=0;ri<regs.length;ri++){
+      var reg=regs[ri],entries=grouped.groups[p][reg];
+      next(34);doc.setFillColor(234,248,252);doc.roundedRect(margin,y,max,26,3,3,'F');
+      doc.setFont('helvetica','bold');doc.setFontSize(11);doc.setTextColor(8,126,152);
+      doc.text(approvedRegion(reg)+'  /  '+entries.length+' updates',margin+12,y+17);y+=39;
+      for(var ei=0;ei<entries.length;ei++){
+        var entry=entries[ei],title=String(ei+1).padStart(2,'0')+'. '+entry.title;
+        var titleLines=doc.splitTextToSize(title,max-24);
+        next(18+titleLines.length*16);
+        doc.setFillColor(245,248,252);doc.roundedRect(margin,y,max,10+titleLines.length*16,3,3,'F');
+        y+=17;draw(title,11,true,[16,43,76],16,margin+12,max-24);y+=7;
+        var body=approvedText(entry);
+        if(body)draw(body,9.5,false,[66,87,106],15,margin+10,max-20);
+        var links=approvedLinks(entry);
+        links.forEach(function(link){
+          next(25);doc.setFont('helvetica','normal');doc.setFontSize(10);doc.setTextColor(8,130,152);
+          doc.textWithLink((links.length>1?approvedRegion(link.region)+' - ':'')+'Official source',margin+10,y+9,{url:link.url});y+=25;
         });
-        next(18);doc.setDrawColor(224,231,237);doc.line(margin,y+6,W-margin,y+6);y+=20;
-      });
-    });
-  });
+        if(!links.length){
+          var urls=approvedImages(entry);
+          for(var j=0;j<urls.length;j++){
+            var data=await pdfImageData(urls[j]);
+            if(!data){missing++;continue;}
+            try{
+              var info=doc.getImageProperties(data),w=Math.min(max-32,info.width),h=w*info.height/info.width;
+              if(h>390){w*=390/h;h=390;}
+              next(h+20);doc.addImage(data,'JPEG',(W-w)/2,y,w,h);y+=h+17;
+            }catch(e){missing++;}
+          }
+        }
+        next(17);doc.setDrawColor(225,233,240);doc.line(margin+10,y+5,W-margin-10,y+5);y+=18;
+      }
+    }
+  }
   doc.save('Merchandising_Newsletter_'+new Date().toISOString().slice(0,10)+'.pdf');
-  setStatus('Exported approved-format newsletter PDF ('+list.length+' updates).',true);
+  setStatus('Exported newsletter PDF ('+list.length+' updates).'+(missing?' '+missing+' image(s) could not be embedded; check image access.':''),missing===0);
 }
 
 function buildExecEmailHtml(list, criticalList, opts){
