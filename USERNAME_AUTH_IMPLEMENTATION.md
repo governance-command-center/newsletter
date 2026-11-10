@@ -59,3 +59,8 @@ Do not merge this draft PR as a completed security solution.
   names, and secure initial admin provisioning are not yet implemented.
 - This staged adapter is intentionally not loaded by production `index.html`.
   Do not interpret its existence as completed live UI integration.
+
+## Staged Hub persistence bridge (10 Nov 2026)
+`AUTH.securePilotBridge()` is now available on the PR branch. It adapts the authenticated client to the existing Hub's `pull`, `push`, `pullData`, `pushData`, and `uploadImage` contracts without activating the bridge in production. Writes use the versioned RPC, and conflicts reject rather than overwrite.
+
+**Still blocked:** wiring this bridge into the actual Hub login and draft/publish workflows; reconciling competing edits without discarding the editor; migrating legacy `store.data.users` password hashes out of browser-readable data; secure account listing/edit/deactivation; and testing against a separate Supabase project with protected policies. The current legacy read/write path is not secure, even if the bridge is present. Do not deploy the cutover SQL or merge as production ready.
