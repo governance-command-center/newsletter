@@ -101,13 +101,15 @@ var AUTH = (function(){
         });
       },
       pushData: function(nextSlides,nextArchives,nextDrafts){
-        var bridge=this;
-        return bridge.pull().then(function(data){
-          if (Array.isArray(nextSlides)) data.slides=nextSlides;
-          if (Array.isArray(nextArchives)) data.archives=nextArchives;
-          if (Array.isArray(nextDrafts)) data.drafts=nextDrafts;
-          return bridge.push(data);
-        });
+        // Never re-read a newer version and then overwrite it with stale
+        // in-memory slides. The save must use the version last observed by
+        // this editor, so concurrent writers get a visible conflict.
+        if (!lastRead) return Promise.reject(new Error('Read shared data before saving'));
+        var data=structuredClone(lastRead);
+        if (Array.isArray(nextSlides)) data.slides=nextSlides;
+        if (Array.isArray(nextArchives)) data.archives=nextArchives;
+        if (Array.isArray(nextDrafts)) data.drafts=nextDrafts;
+        return this.push(data);
       },
       uploadImage: function(dataUrl,filename){ return client.uploadImage(dataUrl,filename); }
     };
