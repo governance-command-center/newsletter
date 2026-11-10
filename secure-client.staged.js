@@ -97,9 +97,32 @@
         throw e;
       }
     }
+    async function uploadImage(dataUrl, filename) {
+      var accessToken = await token();
+      var parts = /^data:([^;,]+);base64,(.*)$/.exec(String(dataUrl || ""));
+      if (!parts || !/^image\/(png|jpeg|webp|gif)$/.test(parts[1]))
+        throw new Error("Only PNG, JPEG, WebP or GIF images are supported");
+      var binary = atob(parts[2]);
+      if (binary.length > 8 * 1024 * 1024)
+        throw new Error("Image exceeds 8 MB");
+      var bytes = new Uint8Array(binary.length);
+      for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      var ext = { "image/png":"png", "image/jpeg":"jpg",
+        "image/webp":"webp", "image/gif":"gif" }[parts[1]];
+      var safe = String(filename || "image").replace(/[^a-z0-9_-]/gi, "_").slice(0, 40);
+      var path = crypto.randomUUID() + "-" + safe + "." + ext;
+      var response = await fetch(base + "/storage/v1/object/entry-images/" + encodeURIComponent(path), {
+        method: "POST",
+        headers: { apikey: key, Authorization: "Bearer " + accessToken,
+          "Content-Type": parts[1], "x-upsert": "false" },
+        body: bytes
+      });
+      if (!response.ok) throw new Error("Image upload failed (" + response.status + ")");
+      return base + "/storage/v1/object/public/entry-images/" + encodeURIComponent(path);
+    }
     return {
       login: login, logout: logout, refresh: refresh, changePassword: changePassword,
-      read: read, save: save,
+      read: read, save: save, uploadImage: uploadImage,
       createUser: async function (username, temporaryPassword, role) {
         return action("create_user", { username: username,
           temporary_password: temporaryPassword, role: role }, await token());
