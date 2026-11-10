@@ -65,6 +65,48 @@ var AUTH = (function(){
   }
   function getSecureClient(){ return secureClient; }
   function disableSecureClient(){ secureClient = null; }
+  // Opt-in staging bridge: no changes to the production default login or writes.
+  // The pilot page can exercise the SAME Hub persistence contract without
+  // loading legacy password hashes into its authenticated browser session.
+  function securePilotBridge(){
+    var client = secureClient;
+    if (!client) throw new Error('Secure client is not initialized');
+    var lastRead = null;
+    return {
+      login: function(username, password){ return client.login(username,password); },
+      changePassword: function(oldPassword,newPassword){ return client.changePassword(oldPassword,newPassword); },
+      logout: function(){ client.logout(); lastRead=null; },
+      getSession: function(){ return client.getSession(); },
+      pull: function(){
+        return client.read().then(function(data){
+          lastRead = data;
+          return normalizeRemote(data);
+        });
+      },
+      push: function(data){
+        if (!lastRead) return Promise.reject(new Error('Read shared data before saving'));
+        return client.save(data).then(function(){
+          lastRead = structuredClone(data);
+          return true;
+        });
+      },
+      pullData: function(){
+        return this.pull().then(function(data){
+          return { slides:data.slides, archives:data.archives, drafts:data.drafts };
+        });
+      },
+      pushData: function(nextSlides,nextArchives,nextDrafts){
+        var bridge=this;
+        return bridge.pull().then(function(data){
+          if (Array.isArray(nextSlides)) data.slides=nextSlides;
+          if (Array.isArray(nextArchives)) data.archives=nextArchives;
+          if (Array.isArray(nextDrafts)) data.drafts=nextDrafts;
+          return bridge.push(data);
+        });
+      },
+      uploadImage: function(dataUrl,filename){ return client.uploadImage(dataUrl,filename); }
+    };
+  }
 
   /* ---- REST helpers ---- */
   function base(){ return cfg.url.replace(/\/+$/,''); }
@@ -253,7 +295,7 @@ var AUTH = (function(){
     pull:pull, push:push, bootstrap:bootstrap, blankRemote:blankRemote,
     createUser:createUser, updateUser:updateUser, resetPassword:resetPassword, deleteUser:deleteUser, setRole:setRole, listUsers:listUsers,
     pullData:pullData, pushData:pushData, getRemote:function(){ return remote; },
-    enableSecureClient:enableSecureClient, getSecureClient:getSecureClient, disableSecureClient:disableSecureClient
+    enableSecureClient:enableSecureClient, getSecureClient:getSecureClient, disableSecureClient:disableSecureClient, securePilotBridge:securePilotBridge
   };
 })();
 try { window.AUTH = AUTH; } catch(e){}
