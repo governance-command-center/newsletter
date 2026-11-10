@@ -654,6 +654,24 @@ function slidesByInputDate(list, key){
   });
 }
 
+/* Coverage-period grouping for the modern Hub. Legacy imports retain a clearly
+   labelled legacy bucket rather than being assigned an invented coverage week. */
+function coverageFilterOptionsHtml(list,selected){
+  var groups={},items=[];
+  (list||[]).forEach(function(entry){
+    var key=coverageKey(entry);
+    if(!groups[key])groups[key]={key:key,label:coverageDisplay(entry),count:0};
+    groups[key].count++;
+  });
+  items=Object.keys(groups).map(function(key){return groups[key];});
+  items.sort(function(a,b){return b.key.localeCompare(a.key);});
+  return '<option value="__all__"'+(selected==='__all__'?' selected':'')+'>All coverage periods ('+(list||[]).length+')</option>'
+    +items.map(function(g){return '<option value="'+esc(g.key)+'"'+(selected===g.key?' selected':'')+'>'+esc(g.label)+' ('+g.count+')</option>';}).join('');
+}
+function slidesByCoverage(list,key){
+  return !key||key==='__all__'?list.slice():list.filter(function(entry){return coverageKey(entry)===key;});
+}
+
 /* ---- Weekly bucketing (ISO week, Monday-based) for a multi-week filter. ----
    Each entry's input date maps to a week key "YYYY-Www". A stable key lets us
    support selecting several weeks at once. Undated entries fall into a
@@ -2076,7 +2094,7 @@ function currentExportScope(){
 function exportJson(listArg, labelArg){
   var scope = currentExportScope();
   var list = listArg || (scope === 'filtered' ? filteredSlides() : slides);
-  if (!listArg) list = slidesByInputDate(list, state.exportDateFilter);
+  if (!listArg) list = slidesByCoverage(list, state.exportDateFilter);
   if (!list.length){ setStatus('Nothing to export — the current selection has no slides.', false); return; }
   var stamp = new Date().toISOString().slice(0,10);
   var payload = {
@@ -2100,7 +2118,7 @@ function exportJson(listArg, labelArg){
 async function exportEmailHtml(listArg, labelArg){
   var scope = currentExportScope();
   var list = listArg || (scope === 'filtered' ? filteredSlides() : slides);
-  if (!listArg) list = slidesByInputDate(list, state.exportDateFilter);
+  if (!listArg) list = slidesByCoverage(list, state.exportDateFilter);
   if (!list.length){ setStatus('Nothing to export — the current selection has no slides.', false); return; }
 
   var baseUrl = state.emailBaseUrl || '';
@@ -2156,7 +2174,7 @@ function buildPrintDoc(list, titleLabel){
 function exportPdf(listArg, labelArg){
   var scope = currentExportScope();
   var list = listArg || (scope === 'filtered' ? filteredSlides() : slides);
-  if (!listArg) list = slidesByInputDate(list, state.exportDateFilter);
+  if (!listArg) list = slidesByCoverage(list, state.exportDateFilter);
   if (!list.length){ setStatus('Nothing to export — the current selection has no slides.', false); return; }
 
   // Preferred path: build a real vector PDF with genuine, clickable link
@@ -3305,10 +3323,10 @@ function renderExecPreview(){
 async function generateExecEmail(){
   var scope = currentExecScope();
   var list = scope === 'all' ? slides : filteredSlides();
-  // Narrow to a single publish date when one is chosen in the dropdown.
-  list = slidesByInputDate(list, state.emailDateFilter);
+  // Narrow to a selected coverage period.
+  list = slidesByCoverage(list, state.emailDateFilter);
   if (!list.length){
-    setStatus('Nothing to include — no slides in the selected scope and publish date.', false);
+    setStatus('Nothing to include — no updates in the selected scope and coverage period.', false);
     return;
   }
 
@@ -5065,13 +5083,13 @@ function renderExportPane(wrap){
   wrap.innerHTML =
     '<div class="panel">'
       + '<div class="panel__head"><h2 class="panel__title">Export slides</h2></div>'
-      + '<p class="panel__hint">Exports respect the Platform / Region / Date / Search filters set on the browse view. <strong>Export as PDF</strong> builds a real PDF where every link — the source links and any links inside the details — is clickable in any PDF reader. <strong>Export as Email</strong> produces the same styled briefing as the Generate email tab — reporting period, summary, per-platform counts, and every update with its platform badge and source link — as a self-contained <code>.html</code> file you can open, forward, or paste into your inbox.</p>'
+      + '<p class="panel__hint">Exports respect the Platform / Region / Coverage Period / Search filters set on the browse view. <strong>Export as PDF</strong> builds a real PDF where every link — the source links and any links inside the details — is clickable in any PDF reader. <strong>Export as Email</strong> produces the same styled briefing as the Generate email tab — reporting period, summary, per-platform counts, and every update with its platform badge and source link — as a self-contained <code>.html</code> file you can open, forward, or paste into your inbox.</p>'
       + '<div class="scopepick">'
         + '<label><input type="radio" name="exportScope" value="filtered" checked> Current filtered view ('+filteredSlides().length+')</label>'
         + '<label><input type="radio" name="exportScope" value="all"> All slides ('+slides.length+')</label>'
       + '</div>'
       + '<div class="datefilterbar">'
-        + '<label class="datefilterbar__label" for="exportDateFilter">Input date to include</label>'
+        + '<label class="datefilterbar__label" for="exportDateFilter">Coverage period to include</label>'
         + '<select id="exportDateFilter" class="datefilterbar__select"></select>'
         + '<span class="datefilterbar__count" id="exportDateCount"></span>'
       + '</div>'
@@ -5082,7 +5100,7 @@ function renderExportPane(wrap){
       + '</div>'
     + '</div>'
 
-    + '<div class="panel">'
+    + '<div class="panel" style="display:none" aria-hidden="true">'
       + '<div class="panel__head"><h2 class="panel__title">Manage slides</h2></div>'
       + '<p class="panel__hint">Fix anything the importer guessed wrong — title, platform, region, date, source link — and it saves to this browser as you go. Tick rows to remove them. '
         + (HAS_STORAGE
@@ -5124,7 +5142,7 @@ function renderExportPane(wrap){
   document.getElementById('exportPdfBtn').addEventListener('click', function(){ exportPdf(); });
   document.getElementById('exportJsonBtn').addEventListener('click', function(){ exportJson(); });
 
-  // Publish-date filter for exports — populated from the chosen scope and kept
+  // Coverage-period filter for exports — populated from the chosen scope and kept
   // in sync when the scope radios change, mirroring the Generate email pane.
   var expDateSel = document.getElementById('exportDateFilter');
   var expDateCount = document.getElementById('exportDateCount');
@@ -5132,11 +5150,11 @@ function renderExportPane(wrap){
   function refreshExportDates(){
     var list = exportScopeList();
     if (state.exportDateFilter !== '__all__' && !list.some(function(s){
-          var k = s.input_date ? s.input_date : NO_INPUT_DATE_KEY; return k === state.exportDateFilter; })){
+          return coverageKey(s) === state.exportDateFilter; })){
       state.exportDateFilter = '__all__';
     }
-    expDateSel.innerHTML = inputDateOptionsHtml(list, state.exportDateFilter);
-    var n = slidesByInputDate(list, state.exportDateFilter).length;
+    expDateSel.innerHTML = coverageFilterOptionsHtml(list, state.exportDateFilter);
+    var n = slidesByCoverage(list, state.exportDateFilter).length;
     if (expDateCount) expDateCount.textContent = n + ' update' + (n === 1 ? '' : 's') + ' will be exported';
   }
   refreshExportDates();
@@ -5239,7 +5257,7 @@ function renderEmailPane(wrap){
         + '<label><input type="radio" name="execScope" value="all"> All slides ('+slides.length+')</label>'
       + '</div>'
       + '<div class="datefilterbar">'
-        + '<label class="datefilterbar__label" for="emailDateFilter">Input date to include</label>'
+        + '<label class="datefilterbar__label" for="emailDateFilter">Coverage period to include</label>'
         + '<select id="emailDateFilter" class="datefilterbar__select"></select>'
         + '<span class="datefilterbar__count" id="emailDateCount"></span>'
       + '</div>'
@@ -5252,7 +5270,7 @@ function renderEmailPane(wrap){
       + '<div id="execPreviewWrap"></div>'
     + '</div>';
 
-  // Populate the publish-date dropdown from whatever scope is currently chosen,
+  // Populate the coverage-period dropdown from whatever scope is currently chosen,
   // and keep it in sync when the scope radios change.
   var dateSel = document.getElementById('emailDateFilter');
   var dateCount = document.getElementById('emailDateCount');
@@ -5261,11 +5279,11 @@ function renderEmailPane(wrap){
     var list = scopeList();
     // Drop a stale date selection that isn't in the current scope.
     if (state.emailDateFilter !== '__all__' && !list.some(function(s){
-          var k = s.input_date ? s.input_date : NO_INPUT_DATE_KEY; return k === state.emailDateFilter; })){
+          return coverageKey(s) === state.emailDateFilter; })){
       state.emailDateFilter = '__all__';
     }
-    dateSel.innerHTML = inputDateOptionsHtml(list, state.emailDateFilter);
-    var n = slidesByInputDate(list, state.emailDateFilter).length;
+    dateSel.innerHTML = coverageFilterOptionsHtml(list, state.emailDateFilter);
+    var n = slidesByCoverage(list, state.emailDateFilter).length;
     if (dateCount) dateCount.textContent = n + ' update' + (n === 1 ? '' : 's') + ' will be included';
   }
   refreshEmailDates();
