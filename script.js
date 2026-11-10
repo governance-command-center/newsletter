@@ -140,7 +140,7 @@ var AUTH = (function(){
 
   // Write the whole payload back (upsert the single row).
   function push(payload){
-    if (secureMode) return Promise.reject(new Error('Secure Hub preview is read-only until the final database security cutover. No data was changed.'));
+    if (secureMode) return Promise.reject(new Error('Secure Hub preview is read-only; no shared changes were made.'));
     return fetch(base()+'/rest/v1/store', {
       method:'POST',
       headers: restHeaders({ 'Prefer':'resolution=merge-duplicates,return=minimal' }),
@@ -290,7 +290,7 @@ var AUTH = (function(){
   /* ---- shared data ---- */
   function pullData(){ return pull().then(function(r){ return { slides:r.slides, archives:r.archives, drafts:r.drafts }; }); }
   function pushData(slidesArr, archivesArr, draftsArr){
-    if (secureMode) return Promise.reject(new Error('Secure Hub preview is read-only until the final database security cutover.'));
+    if (secureMode) return Promise.reject(new Error('Secure Hub preview is read-only; changes cannot be shared yet.'));
     return pull().then(function(r){
       r.slides = Array.isArray(slidesArr)?slidesArr:r.slides;
       if (Array.isArray(archivesArr)) r.archives = archivesArr;
