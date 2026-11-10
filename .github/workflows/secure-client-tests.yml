@@ -1,0 +1,26 @@
+name: Secure Hub adapter contract tests
+on:
+  pull_request:
+    paths:
+      - 'secure-client.staged.js'
+      - 'tests/secure-client.test.cjs'
+      - '.github/workflows/secure-client-tests.yml'
+  push:
+    branches:
+      - feature/pilot-write-concurrency-safeguards
+    paths:
+      - 'secure-client.staged.js'
+      - 'tests/secure-client.test.cjs'
+      - '.github/workflows/secure-client-tests.yml'
+jobs:
+  adapter-contract:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify secure read/save/conflict behavior (isolated mock)
+        run: node tests/secure-client.test.cjs
