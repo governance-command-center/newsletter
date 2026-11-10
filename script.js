@@ -5639,7 +5639,42 @@ function applyRoleVisibility(){
    MEMBERS PANE  (admin only): create users, reset passwords,
    change roles, remove users.
    ============================================================ */
+function renderSecureMembersPane(wrap){
+  var client=AUTH.getSecureClient();
+  if (!client || !client.getSession() || client.getSession().role!=='admin'){
+    wrap.innerHTML='<div class="panel"><p class="panel__hint">Admin access required.</p></div>';
+    return;
+  }
+  wrap.innerHTML='<div class="panel"><div class="panel__head"><h2 class="panel__title">Member accounts</h2></div>'
+    +'<p class="panel__hint">No real email addresses required. Temporary passwords must be changed on first login. Passwords cannot be viewed after creation.</p>'
+    +'<div class="memberform">'
+    +'<label class="authfield">Username<input id="secureMemberName" autocomplete="off" placeholder="newsletter_member01"></label>'
+    +'<label class="authfield">Temporary password (12+ characters)<input id="secureMemberPw" type="password" autocomplete="new-password"></label>'
+    +'<label class="authfield">Role<select id="secureMemberRole"><option value="member">Member</option><option value="admin">Admin</option></select></label>'
+    +'<button type="button" class="btn" id="secureMemberCreate">Create account</button>'
+    +'<button type="button" class="btn" id="secureMemberReset">Reset password</button>'
+    +'</div><div class="authcard__msg" id="secureMemberMsg"></div></div>';
+  function run(action){
+    var username=wrap.querySelector('#secureMemberName').value.trim().toLowerCase();
+    var password=wrap.querySelector('#secureMemberPw').value;
+    var role=wrap.querySelector('#secureMemberRole').value;
+    var message=wrap.querySelector('#secureMemberMsg');
+    var buttons=wrap.querySelectorAll('button');
+    buttons.forEach(function(b){b.disabled=true;});
+    var op=action==='create'
+      ?client.createUser(username,password,role)
+      :client.resetPassword(username,password);
+    op.then(function(){
+      message.textContent=action==='create'?'Account created. Share temporary password privately.':'Password reset. Member must change it at next login.';
+      wrap.querySelector('#secureMemberPw').value='';
+    }).catch(function(e){message.textContent=e.message||'Operation failed';})
+      .finally(function(){buttons.forEach(function(b){b.disabled=false;});});
+  }
+  wrap.querySelector('#secureMemberCreate').onclick=function(){run('create');};
+  wrap.querySelector('#secureMemberReset').onclick=function(){run('reset');};
+}
 function renderMembersPane(wrap){
+  if (AUTH.getSecureClient() && AUTH.getSecureClient().getSession()) return renderSecureMembersPane(wrap);
   if (!AUTH.isAdmin()){
     wrap.innerHTML = '<div class="panel"><p class="panel__hint">This section is for admins only.</p></div>';
     return;
