@@ -15,8 +15,8 @@ small{color:#536176}#status{white-space:pre-wrap;padding:12px;background:#e9eff8
 </style></head><body><main>
 <h1>Merchandising Hub — Auth Pilot</h1>
 <p><strong>Internal test page only.</strong> Connected to the existing Supabase project for authentication checks. This page cannot save Hub entries. Use only the approved admin account.</p>
-<section id="login"><h2>Sign in</h2><h2>Member sign in</h2>
-<label for="username">Username</label><input id="username" autocomplete="username">
+<section id="login"><h2>Sign in</h2>
+<label for="username">Username</label><input id="username" autocomplete="username" placeholder="newsletter_governance"><small>Enter username only, not the internal @users.invalid address.</small>
 <label for="password">Password</label><input id="password" type="password" autocomplete="current-password">
 <button id="signin">Sign in</button></section>
 <section id="change" hidden><h2>Set your own password</h2><p>Temporary password must be changed before accessing the Hub.</p>
@@ -58,7 +58,7 @@ async function run(button,work){
 
 $('signin').onclick=function(){run(this,async function(){
   ensureClient();
-  var result=await client.login($('username').value.trim().toLowerCase(),$('password').value);
+  var result=await client.login($('username').value.trim().toLowerCase().replace(/@users\\.invalid$/i,''),$('password').value);
   $('password').value='';
   show('login',false);show('change',result.mustChangePassword);
   show('member',!result.mustChangePassword);show('admin',!result.mustChangePassword&&result.role==='admin');
