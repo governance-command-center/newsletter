@@ -74,7 +74,15 @@ Deno.serve(async (request) => {
   if (!current) return reply(401, { error: "Sign in required" });
 
   if (action === "change_password") {
-    if (!validPassword(body.new_password)) return reply(400, { error: "Password must have 12–128 characters" });
+    if (!validPassword(body.new_password) || typeof body.current_password !== "string")
+      return reply(400, { error: "Current password and a new 12–128 character password required" });
+    // A valid access token alone is insufficient: after an admin reset, an
+    // older session may still exist. Re-authenticate with the CURRENT password
+    // before allowing any change to clear the first-login requirement.
+    const { error: verifyError } = await publicClient.auth.signInWithPassword({
+      email: current.user.email!, password: body.current_password,
+    });
+    if (verifyError) return reply(401, { error: "Current password incorrect" });
     // Atomically change password and clear forced-change flag using trusted
     // admin API. Never accept a user-controlled flag in any other endpoint.
     const { error } = await admin.auth.admin.updateUserById(current.user.id, {
