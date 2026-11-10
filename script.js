@@ -654,6 +654,37 @@ function slidesByInputDate(list, key){
   });
 }
 
+/* Multi-period selection for fortnightly newsletters. Empty selection means all. */
+var selectedCoveragePeriods={export:new Set(),email:new Set()};
+function coverageMultiFilter(list,kind){
+  var chosen=selectedCoveragePeriods[kind];
+  return chosen.size?list.filter(function(e){return chosen.has(coverageKey(e));}):list.slice();
+}
+function coverageMultiControl(list,kind,container,countEl){
+  var chosen=selectedCoveragePeriods[kind],groups={};
+  list.forEach(function(e){var key=coverageKey(e);if(!groups[key])groups[key]={key:key,label:coverageDisplay(e),count:0};groups[key].count++;});
+  var keys=Object.keys(groups).sort(function(a,b){return b.localeCompare(a);});
+  Array.from(chosen).forEach(function(key){if(!groups[key])chosen.delete(key);});
+  container.innerHTML='<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px"><label style="font-weight:600"><input type="checkbox" data-coverage-all '+(!chosen.size?'checked':'')+'> All coverage periods</label><span style="font-size:12px;color:#60738b">Or select multiple periods below</span></div>'
+    +'<div style="display:flex;flex-wrap:wrap;gap:8px">'+keys.map(function(key){var g=groups[key];return '<label style="display:inline-flex;align-items:center;gap:5px;padding:7px 10px;border:1px solid #d4dfec;border-radius:7px;background:#f8fbff;font-size:12px"><input type="checkbox" data-coverage-key="'+esc(key)+'" '+(chosen.has(key)?'checked':'')+'>'+esc(g.label)+' ('+g.count+')</label>';}).join('')+'</div>';
+  var n=coverageMultiFilter(list,kind).length;
+  if(countEl)countEl.textContent=n+' update'+(n===1?'':'s')+(kind==='export'?' will be exported':' will be included');
+  var all=container.querySelector('[data-coverage-all]');
+  all.addEventListener('change',function(){chosen.clear();coverageMultiControl(list,kind,container,countEl);});
+  container.querySelectorAll('[data-coverage-key]').forEach(function(cb){
+    cb.addEventListener('change',function(){
+      if(cb.checked){
+        if(!chosen.size){/* Switch from all to a specific period. */chosen.add(cb.getAttribute('data-coverage-key'));}
+        else chosen.add(cb.getAttribute('data-coverage-key'));
+      }else{
+        chosen.delete(cb.getAttribute('data-coverage-key'));
+        /* Do not silently revert to all if the last checked period is removed. */
+        if(!chosen.size){chosen.add(cb.getAttribute('data-coverage-key')); }
+      }
+      coverageMultiControl(list,kind,container,countEl);
+    });
+  });
+}
 /* Coverage-period grouping for the modern Hub. Legacy imports retain a clearly
    labelled legacy bucket rather than being assigned an invented coverage week. */
 function coverageFilterOptionsHtml(list,selected){
@@ -2094,7 +2125,7 @@ function currentExportScope(){
 function exportJson(listArg, labelArg){
   var scope = currentExportScope();
   var list = listArg || (scope === 'filtered' ? filteredSlides() : slides);
-  if (!listArg) list = slidesByCoverage(list, state.exportDateFilter);
+  if (!listArg) list = coverageMultiFilter(list, 'export');
   if (!list.length){ setStatus('Nothing to export — the current selection has no slides.', false); return; }
   var stamp = new Date().toISOString().slice(0,10);
   var payload = {
@@ -2118,7 +2149,7 @@ function exportJson(listArg, labelArg){
 async function exportEmailHtml(listArg, labelArg){
   var scope = currentExportScope();
   var list = listArg || (scope === 'filtered' ? filteredSlides() : slides);
-  if (!listArg) list = slidesByCoverage(list, state.exportDateFilter);
+  if (!listArg) list = coverageMultiFilter(list, 'export');
   if (!list.length){ setStatus('Nothing to export — the current selection has no slides.', false); return; }
 
   var baseUrl = state.emailBaseUrl || '';
@@ -2174,7 +2205,7 @@ function buildPrintDoc(list, titleLabel){
 function exportPdf(listArg, labelArg){
   var scope = currentExportScope();
   var list = listArg || (scope === 'filtered' ? filteredSlides() : slides);
-  if (!listArg) list = slidesByCoverage(list, state.exportDateFilter);
+  if (!listArg) list = coverageMultiFilter(list, 'export');
   if (!list.length){ setStatus('Nothing to export — the current selection has no slides.', false); return; }
 
   // Preferred path: build a real vector PDF with genuine, clickable link
@@ -3389,7 +3420,7 @@ async function generateExecEmail(){
   var scope = currentExecScope();
   var list = scope === 'all' ? slides : filteredSlides();
   // Narrow to a selected coverage period.
-  list = slidesByCoverage(list, state.emailDateFilter);
+  list = coverageMultiFilter(list, 'email');
   if (!list.length){
     setStatus('Nothing to include — no updates in the selected scope and coverage period.', false);
     return;
@@ -5155,7 +5186,7 @@ function renderExportPane(wrap){
       + '</div>'
       + '<div class="datefilterbar">'
         + '<label class="datefilterbar__label" for="exportDateFilter">Coverage period to include</label>'
-        + '<select id="exportDateFilter" class="datefilterbar__select"></select>'
+        + '<div id="exportDateFilter" style="width:100%"></div>'
         + '<span class="datefilterbar__count" id="exportDateCount"></span>'
       + '</div>'
       + '<div class="adminpanel__row">'
@@ -5212,24 +5243,9 @@ function renderExportPane(wrap){
   var expDateSel = document.getElementById('exportDateFilter');
   var expDateCount = document.getElementById('exportDateCount');
   function exportScopeList(){ return currentExportScope() === 'all' ? slides : filteredSlides(); }
-  function refreshExportDates(){
-    var list = exportScopeList();
-    if (state.exportDateFilter !== '__all__' && !list.some(function(s){
-          return coverageKey(s) === state.exportDateFilter; })){
-      state.exportDateFilter = '__all__';
-    }
-    expDateSel.innerHTML = coverageFilterOptionsHtml(list, state.exportDateFilter);
-    var n = slidesByCoverage(list, state.exportDateFilter).length;
-    if (expDateCount) expDateCount.textContent = n + ' update' + (n === 1 ? '' : 's') + ' will be exported';
-  }
+  function refreshExportDates(){coverageMultiControl(exportScopeList(),'export',expDateSel,expDateCount);}
   refreshExportDates();
-  expDateSel.addEventListener('change', function(){
-    state.exportDateFilter = expDateSel.value || '__all__';
-    refreshExportDates();
-  });
-  wrap.querySelectorAll('input[name="exportScope"]').forEach(function(r){
-    r.addEventListener('change', refreshExportDates);
-  });
+  wrap.querySelectorAll('input[name="exportScope"]').forEach(function(r){r.addEventListener('change',refreshExportDates);});
 
   function refreshCount(){
     var el = document.getElementById('delCount');
@@ -5323,7 +5339,7 @@ function renderEmailPane(wrap){
       + '</div>'
       + '<div class="datefilterbar">'
         + '<label class="datefilterbar__label" for="emailDateFilter">Coverage period to include</label>'
-        + '<select id="emailDateFilter" class="datefilterbar__select"></select>'
+        + '<div id="emailDateFilter" style="width:100%"></div>'
         + '<span class="datefilterbar__count" id="emailDateCount"></span>'
       + '</div>'
       + '<div class="fieldrow">'
@@ -5340,25 +5356,9 @@ function renderEmailPane(wrap){
   var dateSel = document.getElementById('emailDateFilter');
   var dateCount = document.getElementById('emailDateCount');
   function scopeList(){ return currentExecScope() === 'all' ? slides : filteredSlides(); }
-  function refreshEmailDates(){
-    var list = scopeList();
-    // Drop a stale date selection that isn't in the current scope.
-    if (state.emailDateFilter !== '__all__' && !list.some(function(s){
-          return coverageKey(s) === state.emailDateFilter; })){
-      state.emailDateFilter = '__all__';
-    }
-    dateSel.innerHTML = coverageFilterOptionsHtml(list, state.emailDateFilter);
-    var n = slidesByCoverage(list, state.emailDateFilter).length;
-    if (dateCount) dateCount.textContent = n + ' update' + (n === 1 ? '' : 's') + ' will be included';
-  }
+  function refreshEmailDates(){coverageMultiControl(scopeList(),'email',dateSel,dateCount);}
   refreshEmailDates();
-  dateSel.addEventListener('change', function(){
-    state.emailDateFilter = dateSel.value || '__all__';
-    refreshEmailDates();
-  });
-  wrap.querySelectorAll('input[name="execScope"]').forEach(function(r){
-    r.addEventListener('change', refreshEmailDates);
-  });
+  wrap.querySelectorAll('input[name="execScope"]').forEach(function(r){r.addEventListener('change',refreshEmailDates);});
 
   document.getElementById('emailBaseUrlExec').addEventListener('input', function(e){ state.emailBaseUrl = e.target.value; });
   document.getElementById('execGenerateBtn').addEventListener('click', generateExecEmail);
