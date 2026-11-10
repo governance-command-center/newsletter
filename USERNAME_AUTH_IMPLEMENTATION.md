@@ -44,3 +44,18 @@ Never put the service-role key in frontend files or public GitHub secrets.
 Do not execute `001_pilot_safeguards_PREPARE_ONLY.sql` on production as a
 standalone fix. It is additive and does NOT secure existing open policies.
 Do not merge this draft PR as a completed security solution.
+
+## Additional review findings (10 Nov 2026)
+- The current live `script.js` uses a lightweight client-side hash and whole-row
+  REST upsert. It is not protected by merely deploying an Edge Function.
+- Image upload also uses the public key. Staged adapter now has authenticated
+  upload and a prepare-only storage policy, but existing open storage policies
+  must be inventoried and removed at cutover.
+- **Critical**: password reset updates Auth metadata, but an already-issued JWT
+  can carry the previous `must_change_password=false` claim until expiry.
+  Database authorization must check current server-side account state (or
+  revoke/expire sessions with a tested approach), not trust stale JWT claims.
+- Account deletion, disabling, role edits, migration of old member display
+  names, and secure initial admin provisioning are not yet implemented.
+- This staged adapter is intentionally not loaded by production `index.html`.
+  Do not interpret its existence as completed live UI integration.
