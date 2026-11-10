@@ -57,9 +57,9 @@
       if (session.expires_at && session.expires_at - Date.now() / 1000 < 60) await refresh();
       return session.access_token;
     }
-    async function changePassword(newPassword) {
+    async function changePassword(currentPassword, newPassword) {
       if (!session) throw new Error("Sign in required");
-      await action("change_password", { new_password: newPassword }, session.access_token);
+      await action("change_password", { current_password: currentPassword, new_password: newPassword }, session.access_token);
       // Deliberately require a fresh login; do not reuse old JWT claims.
       logout();
       return { reloginRequired: true };
