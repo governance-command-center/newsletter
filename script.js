@@ -3928,7 +3928,7 @@ function renderAddPane(wrap){
       + '<td>'+esc(entryRegions(s).join(', '))+'</td>'
       + '<td>'+esc(s.input_date ? fmtDate(s.input_date) : '—')+'</td>'
       + '<td>'+esc(s.createdBy || '—')+'</td>'
-      + '<td style="white-space:nowrap;">'+esc(fmtStamp(s.createdAt))+'</td>'
+      + '<td style="white-space:nowrap;" title="Created: '+esc(fmtStamp(s.createdAt))+'&#10;Last edited by: '+esc(s.updatedBy||s.createdBy||'—')+'">'+esc(fmtStamp(s.updatedAt||s.createdAt))+'</td>'
       + '<td style="white-space:nowrap;">'
         + '<button type="button" class="entrytable__act" data-edit="'+esc(s.id)+'">Edit</button>'
         + '<button type="button" class="entrytable__act" data-duplicate="'+esc(s.id)+'">Duplicate</button>'
@@ -4051,7 +4051,7 @@ function renderAddPane(wrap){
             + '<button type="button" class="btn" id="archiveSelectedBtn" disabled>Archive selected</button>'
           + '</div>'
           + (listRows
-            ? '<table class="entrytable"><thead><tr><th class="entrytable__check"></th><th>Title</th><th>Platform</th><th>Region</th><th>Input date</th><th>Added by</th><th>Timestamp</th><th></th></tr></thead><tbody>'+listRows+'</tbody></table>'
+            ? '<table class="entrytable"><thead><tr><th class="entrytable__check"></th><th>Title</th><th>Platform</th><th>Region</th><th>Input date</th><th>Added by</th><th>Last updated</th><th></th></tr></thead><tbody>'+listRows+'</tbody></table>'
             : '<div class="detailblock__empty">No entries in this coverage period.</div>')
         : '<div class="detailblock__empty">No entries yet.</div>')
     + '</div>';
