@@ -3694,7 +3694,10 @@ function markAddSaved(){
   },true);
 });
 document.addEventListener('click',function(e){
-  if(state.nav==='add'&&e.isTrusted&&e.target.closest&&e.target.closest('button'))
+  if(state.nav!=='add'||!e.isTrusted||!e.target.closest)return;
+  // Only editor controls can change the draft. Clicking Edit, Duplicate,
+  // Preview, or an existing-entry action is navigation, not an edit.
+  if(e.target.closest('#detailBlocks button, #addDetailBtn, #addImageBtn'))
     addUserEditedSinceBaseline=true;
 },true);
 function addHasUnsavedChanges(){
