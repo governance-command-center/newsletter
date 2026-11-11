@@ -4550,10 +4550,12 @@ function saveSharedDraft(wrap){
     remote.drafts=remoteDrafts.filter(function(x){return x.draftId!==id;}).concat([item]);
     return AUTH.push(remote).then(function(){sharedDrafts=remote.drafts;});
   }).then(function(){
-    state.editDraft.draftId=id;markAddSaved();
+    state.editDraft.draftId=id;
     setSyncStatus('Shared drafts saved ✓',true);
     setStatus('Draft saved for the team. It is not published.',true);
     renderAddPane(wrap);
+    syncDraftFromForm();
+    markAddSaved();
   }).catch(function(err){
     setSyncStatus('Could not save draft: '+(err.message||err),false);
     setStatus('Draft save failed: '+(err&&err.message?err.message:'Unknown storage error')+'. Your form is still here; please retry.',false);
@@ -4718,8 +4720,11 @@ function saveEntry(wrap){
     });
   }
   state.editDraft = blankDraft();     // reset for the next entry
-  markAddSaved();
   renderAddPane(wrap);
+  // Rendering can normalize fields (for example, a blank region URL).
+  // Baseline must match the rendered form, not the pre-render draft.
+  syncDraftFromForm();
+  markAddSaved();
 }
 
 /* ============================================================
