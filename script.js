@@ -3681,9 +3681,24 @@ function addSnapshot(d){
     title:d.title||'',regions:(d.regions||[]).slice(),links:d.links||{},body:d.body||[]
   });
 }
-function markAddSaved(){state.addBaseline=addSnapshot(state.editDraft);}
+// After saving, rendered form controls may normalize empty links/rich text.
+// Do not warn until a real user interaction occurs after the saved baseline.
+var addUserEditedSinceBaseline=false;
+function markAddSaved(){
+  state.addBaseline=addSnapshot(state.editDraft);
+  addUserEditedSinceBaseline=false;
+}
+['input','change'].forEach(function(type){
+  document.addEventListener(type,function(e){
+    if(state.nav==='add'&&e.isTrusted)addUserEditedSinceBaseline=true;
+  },true);
+});
+document.addEventListener('click',function(e){
+  if(state.nav==='add'&&e.isTrusted&&e.target.closest&&e.target.closest('button'))
+    addUserEditedSinceBaseline=true;
+},true);
 function addHasUnsavedChanges(){
-  if(!state.editDraft||state.addBaseline===null)return false;
+  if(!state.editDraft||state.addBaseline===null||!addUserEditedSinceBaseline)return false;
   if(state.nav==='add'&&document.getElementById('fTitle'))syncDraftFromForm();
   return addSnapshot(state.editDraft)!==state.addBaseline;
 }
