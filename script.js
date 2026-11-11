@@ -3095,6 +3095,41 @@ function approvedText(s){
     return b.text||'';
   }).filter(Boolean).join(' ').replace(/\s+/g,' ').trim();
 }
+/* Preserve the author's paragraph and list structure in PDF output. */
+function approvedPdfParagraphs(s){
+  var blocks=[];
+  (s.body||[]).forEach(function(b){
+    if(b.type==='image')return;
+    if(b.type==='rich'){
+      var el=document.createElement('div');
+      el.innerHTML=b.html||'';
+      var children=Array.from(el.children);
+      if(!children.length)children=[el];
+      children.forEach(function(node){
+        var tag=node.tagName.toLowerCase();
+        if(tag==='ul'||tag==='ol'){
+          Array.from(node.querySelectorAll('li')).forEach(function(li,i){
+            var value=(li.textContent||'').replace(/\\s+/g,' ').trim();
+            if(value)blocks.push({text:(tag==='ol'?(i+1)+'. ':'• ')+value,kind:'list'});
+          });
+        }else{
+          var parts=(node.innerText||node.textContent||'').split(/\\n+/);
+          parts.forEach(function(part){
+            var value=part.replace(/\\s+/g,' ').trim();
+            if(value)blocks.push({text:value,kind:/^h[1-6]$/.test(tag)?'heading':'paragraph'});
+          });
+        }
+      });
+    }else if(b.type==='table'&&b.rows){
+      b.rows.forEach(function(row){blocks.push({text:row.join('  |  '),kind:'paragraph'});});
+    }else{
+      String(b.text||'').split(/\\n+/).forEach(function(part){
+        var value=part.trim();if(value)blocks.push({text:value,kind:/^[•*-]\\s/.test(value)?'list':'paragraph'});
+      });
+    }
+  });
+  return blocks;
+}
 function approvedImages(s){return (s.body||[]).filter(function(b){return b.type==='image'&&(b.dataUrl||b.url);}).map(function(b){return b.dataUrl||b.url;});}
 function approvedRegion(reg){return ({Malaysia:'MY',Philippines:'PH',Singapore:'SG',Thailand:'TH',Vietnam:'VN',Indonesia:'ID'})[reg]||reg;}
 function approvedRegions(group){
@@ -3231,8 +3266,14 @@ async function approvedPdfVector(list,label,jsPDFCtor){
         next(18+titleLines.length*16);
         doc.setFillColor(245,248,252);doc.roundedRect(margin,y,max,10+titleLines.length*16,3,3,'F');
         y+=17;draw(title,11,true,[16,43,76],16,margin+12,max-24);y+=7;
-        var body=approvedText(entry);
-        if(body)draw(body,9.5,false,[66,87,106],15,margin+10,max-20);
+        var paragraphs=approvedPdfParagraphs(entry);
+        paragraphs.forEach(function(block){
+          var heading=block.kind==='heading';
+          var indent=block.kind==='list'?20:12;
+          next(heading?22:18);
+          draw(block.text,heading?10.5:9.5,heading,[66,87,106],heading?17:15,margin+indent,max-indent-12);
+          y+=heading?6:8;
+        });
         var links=approvedLinks(entry);
         links.forEach(function(link){
           next(25);doc.setFont('helvetica','normal');doc.setFontSize(10);doc.setTextColor(8,130,152);
