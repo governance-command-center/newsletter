@@ -107,7 +107,7 @@ var AUTH = (function(){
         if (Array.isArray(nextSlides)) desired.slides=structuredClone(nextSlides);
         if (Array.isArray(nextArchives)) desired.archives=structuredClone(nextArchives);
         if (Array.isArray(nextDrafts)) desired.drafts=structuredClone(nextDrafts);
-        try { return await this.push(desired); }
+        try { await this.push(desired); return { data: structuredClone(desired) }; }
         catch(e){
           if(!e.isConflict) throw e;
           // A version conflict may involve unrelated records. Reload and
@@ -117,7 +117,7 @@ var AUTH = (function(){
             var latest=await client.read();
             lastRead=structuredClone(latest);
             var merged=mergeIndependentEntries(baseline,desired,latest);
-            try { return await this.push(merged); }
+            try { await this.push(merged); return { data: structuredClone(merged) }; }
             catch(retryError){ if(!retryError.isConflict) throw retryError; }
           }
           var busy=new Error('Other members are still saving. Your changes remain in this browser; please retry.');
@@ -463,15 +463,24 @@ function saveSlides(){
    rapid edits don't race. Surfaces success/failure via setStatus. */
 var _syncPushChain = Promise.resolve();
 var _syncPending = false;
+var _syncEditGeneration = 0;
 function syncPush(){
   if (!(window.AUTH && AUTH.isConfigured())) return;
   if (AUTH.isSecureMode() && !AUTH.getSecureBridge()) return;
   _syncPending = true;
+  _syncEditGeneration++;
   _syncPushChain = _syncPushChain.then(function(){
     if (!_syncPending) return;
     _syncPending = false;
+    var generation = _syncEditGeneration;
     setSyncStatus('Saving to shared store…');
-    return AUTH.pushData(slides, archives).then(function(){
+    return AUTH.pushData(slides, archives).then(function(result){
+      // Never replace edits made while this request was in flight.
+      if (result && result.data && generation === _syncEditGeneration && !_syncPending) {
+        slides = structuredClone(result.data.slides || []);
+        archives = structuredClone(result.data.archives || []);
+        sharedDrafts = structuredClone(result.data.drafts || []);
+      }
       setSyncStatus('All changes saved and shared ✓', true);
     });
   }).catch(function(e){
