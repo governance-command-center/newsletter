@@ -100,19 +100,69 @@ var AUTH = (function(){
           return { slides:data.slides, archives:data.archives, drafts:data.drafts };
         });
       },
-      pushData: function(nextSlides,nextArchives,nextDrafts){
-        // Never re-read a newer version and then overwrite it with stale
-        // in-memory slides. The save must use the version last observed by
-        // this editor, so concurrent writers get a visible conflict.
-        if (!lastRead) return Promise.reject(new Error('Read shared data before saving'));
-        var data=structuredClone(lastRead);
-        if (Array.isArray(nextSlides)) data.slides=nextSlides;
-        if (Array.isArray(nextArchives)) data.archives=nextArchives;
-        if (Array.isArray(nextDrafts)) data.drafts=nextDrafts;
-        return this.push(data);
+      pushData: async function(nextSlides,nextArchives,nextDrafts){
+        if (!lastRead) throw new Error('Read shared data before saving');
+        var baseline=structuredClone(lastRead);
+        var desired=structuredClone(baseline);
+        if (Array.isArray(nextSlides)) desired.slides=structuredClone(nextSlides);
+        if (Array.isArray(nextArchives)) desired.archives=structuredClone(nextArchives);
+        if (Array.isArray(nextDrafts)) desired.drafts=structuredClone(nextDrafts);
+        try { return await this.push(desired); }
+        catch(e){
+          if(!e.isConflict) throw e;
+          // A version conflict may involve unrelated records. Reload and
+          // merge only if none of our changed records were changed remotely.
+          // Retry at most twice; never overwrite a same-record conflict.
+          for(var attempt=0;attempt<2;attempt++){
+            var latest=await client.read();
+            lastRead=structuredClone(latest);
+            var merged=mergeIndependentEntries(baseline,desired,latest);
+            try { return await this.push(merged); }
+            catch(retryError){ if(!retryError.isConflict) throw retryError; }
+          }
+          var busy=new Error('Other members are still saving. Your changes remain in this browser; please retry.');
+          busy.isConflict=true;throw busy;
+        }
       },
       uploadImage: function(dataUrl,filename){ return client.uploadImage(dataUrl,filename); }
     };
+  }
+
+  // Three-way merge for independent newsletter records. Same-record edits
+  // remain conflicts; never silently replace another editor's work.
+  function mergeIndependentEntries(base, local, latest){
+    function index(data){
+      var map={};
+      ['slides','archives','drafts'].forEach(function(group){
+        (data[group]||[]).forEach(function(item){
+          var id=group==='drafts'?item.draftId:item.id;
+          if(!id) throw new Error('Cannot merge record without an ID');
+          var key=(group==='drafts'?'draft:':'entry:')+id;
+          if(map[key]) throw new Error('Duplicate newsletter record ID: '+id);
+          map[key]={group:group,item:item};
+        });
+      });
+      return map;
+    }
+    var before=index(base), mine=index(local), theirs=index(latest);
+    var result=structuredClone(latest);
+    var keys=new Set(Object.keys(before).concat(Object.keys(mine)));
+    function same(a,b){return JSON.stringify(a===undefined?null:a)===JSON.stringify(b===undefined?null:b);}
+    keys.forEach(function(key){
+      if(same(before[key],mine[key])) return;
+      if(!same(before[key],theirs[key])) {
+        var err=new Error('Another member changed the same entry. Your work was not overwritten.');
+        err.isConflict=true;
+        throw err;
+      }
+      ['slides','archives','drafts'].forEach(function(group){
+        result[group]=(result[group]||[]).filter(function(item){
+          return (group==='drafts'?'draft:':'entry:')+(group==='drafts'?item.draftId:item.id)!==key;
+        });
+      });
+      if(mine[key]) result[mine[key].group].push(mine[key].item);
+    });
+    return result;
   }
 
   /* ---- REST helpers ---- */
