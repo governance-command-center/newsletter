@@ -3926,7 +3926,7 @@ function renderAddPane(wrap){
       + '<td class="entrytable__title">'+esc(s.title)+'</td>'
       + '<td>'+esc(s.platform)+'</td>'
       + '<td>'+esc(entryRegions(s).join(', '))+'</td>'
-      + '<td>'+esc(s.input_date ? fmtDate(s.input_date) : '—')+'</td>'
+
       + '<td>'+esc(s.createdBy || '—')+'</td>'
       + '<td style="white-space:nowrap;" title="Created: '+esc(fmtStamp(s.createdAt))+'&#10;Last edited by: '+esc(s.updatedBy||s.createdBy||'—')+'">'+esc(fmtStamp(s.updatedAt||s.createdAt))+'</td>'
       + '<td style="white-space:nowrap;">'
@@ -3940,7 +3940,7 @@ function renderAddPane(wrap){
   // Build grouped rows: first by coverage period (newest first), then by region
   // (PH-MY-SG-TH-VN). An entry covering several regions appears once, filed
   // under its first region in that order.
-  var COLSPAN = 8;
+  var COLSPAN = 7;
   function primaryRegionForGroup(s){
     var regs = entryRegions(s);
     if (!regs.length) return '';
@@ -4051,7 +4051,7 @@ function renderAddPane(wrap){
             + '<button type="button" class="btn" id="archiveSelectedBtn" disabled>Archive selected</button>'
           + '</div>'
           + (listRows
-            ? '<table class="entrytable"><thead><tr><th class="entrytable__check"></th><th>Title</th><th>Platform</th><th>Region</th><th>Input date</th><th>Added by</th><th>Last updated</th><th></th></tr></thead><tbody>'+listRows+'</tbody></table>'
+            ? '<table class="entrytable"><thead><tr><th class="entrytable__check"></th><th>Title</th><th>Platform</th><th>Region</th><th>Added by</th><th>Last updated</th><th></th></tr></thead><tbody>'+listRows+'</tbody></table>'
             : '<div class="detailblock__empty">No entries in this coverage period.</div>')
         : '<div class="detailblock__empty">No entries yet.</div>')
     + '</div>';
