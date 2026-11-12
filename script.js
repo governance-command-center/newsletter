@@ -3179,51 +3179,43 @@ function approvedEmailHtml(list){
 /* Magazine-inspired email. Inline/table styling is intentional for Outlook. */
 /* Render stored content as spaced, email-safe paragraphs and bullet rows. */
 /* Email is a short digest; full source text stays in the PDF and saved entry. */
+/* Compact editorial digest: full details remain in the PDF and source entry. */
 function editorialBodyHtml(entry){
-  var paragraphs=[],bullets=[];
-  function clean(v){return String(v||'').replace(/\s+/g,' ').trim();}
-  function add(v,isBullet){
-    v=clean(v);if(!v)return;
-    if(isBullet||/^[•*\-]\s/.test(v)){
-      v=v.replace(/^[•*\-]\s*/,'');
-      if(v&&!bullets.includes(v))bullets.push(v);
-    }else if(!paragraphs.includes(v))paragraphs.push(v);
+  var parts=[];
+  function add(value){
+    value=String(value||'').replace(/\s+/g,' ').replace(/^[•*\-]\s*/,'').trim();
+    if(value && !parts.includes(value))parts.push(value);
   }
-  (entry.body||[]).forEach(function(b){
-    if(b.type==='image')return;
-    if(b.type==='rich'){
-      var root=document.createElement('div');root.innerHTML=b.html||'';
-      root.querySelectorAll('li').forEach(function(li){add(li.textContent,true);});
-      root.querySelectorAll('li').forEach(function(li){li.remove();});
-      root.querySelectorAll('p,div,h1,h2,h3,h4,h5,h6').forEach(function(node){
-        if(node.querySelector('p,div,h1,h2,h3,h4,h5,h6'))return;
-        add(node.textContent,false);
-      });
-      if(!paragraphs.length)add(root.textContent,false);
-    }else if(b.type==='table'&&b.rows){
-      b.rows.forEach(function(row){add(row.join(' | '),false);});
-    }else{
-      String(b.text||'').split(/\n+/).forEach(function(v){add(v,false);});
-    }
+  (entry.body||[]).forEach(function(block){
+    if(block.type==='image')return;
+    if(block.type==='rich'){
+      var root=document.createElement('div');root.innerHTML=block.html||'';
+      root.querySelectorAll('p,li,h1,h2,h3,h4,h5,h6').forEach(function(node){add(node.textContent);});
+      if(!root.querySelector('p,li,h1,h2,h3,h4,h5,h6'))add(root.textContent);
+    }else if(block.type==='table'&&block.rows){
+      block.rows.forEach(function(row){add(row.join(' | '));});
+    }else String(block.text||'').split(/\n+/).forEach(add);
   });
-  var full=paragraphs.join(' ').replace(/\s+/g,' ').trim();
-  // Prefer complete sentences, never arbitrary line wraps from the source editor.
-  var sentences=full.match(/[^.!?]+[.!?]+(?=\s|$)|[^.!?]+$/g)||[];
+  var title=String(entry.title||'').toLowerCase();
+  var candidate=parts.find(function(p){
+    return p.length>=65 && p.toLowerCase()!==title && !/^(eligibility criteria|recommendations to prepare|what will happen|what happens when)/i.test(p);
+  })||parts.find(function(p){return p.length>=30;})||'';
+  // Only include complete sentences. Never split a sentence halfway.
+  var sentences=candidate.match(/[^.!?]+(?:[.!?]+(?=\s|$)|$)/g)||[];
   var summary='';
-  sentences.forEach(function(part){
-    part=clean(part);
-    if(!part||summary.length>=260)return;
-    if(summary && summary.length+part.length>300)return;
-    summary+=(summary?' ':'')+part;
-  });
-  if(!summary)summary=full;
-  if(summary.length>320)summary=summary.slice(0,317).replace(/\s+\S*$/,'')+'…';
-  var out=summary?'<p style="font-size:14px;line-height:1.75;color:#42556a;margin:20px 0 13px">'+esc(summary)+'</p>':'';
-  bullets.slice(0,3).forEach(function(value){
-    if(value.length>155)value=value.slice(0,152).replace(/\s+\S*$/,'')+'…';
-    out+='<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 7px"><tr><td valign="top" width="18" style="font-size:14px;line-height:1.6;color:#b28b4c">•</td><td style="font-size:13px;line-height:1.65;color:#42556a">'+esc(value)+'</td></tr></table>';
-  });
-  return out;
+  for(var i=0;i<sentences.length;i++){
+    var sentence=sentences[i].trim();
+    if(!sentence)continue;
+    if(summary && summary.length+sentence.length+1>210)break;
+    if(!summary && sentence.length>240){
+      summary=sentence;break;
+    }
+    summary+=(summary?' ':'')+sentence;
+    if(summary.length>=130)break;
+  }
+  if(!summary)summary=candidate;
+  // A long first sentence is displayed intact rather than producing a misleading fragment.
+  return summary?'<p style="font-size:14px;line-height:1.7;color:#42556a;margin:17px 0 13px">'+esc(summary)+'</p>':'';
 }
 function editorialEmailHtml(list){
   var grouped=approvedGroups(list),period=periodCoveredLabel(list);
