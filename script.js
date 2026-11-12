@@ -3326,7 +3326,7 @@ function approvedPrintHtml(list){
           +'<div style="font-size:11px;line-height:1.6;color:#50677a">'+esc(approvedText(s))+'</div>';
         var links=approvedLinks(s);
         links.forEach(function(l){html+='<p><a href="'+esc(l.url)+'" style="font-size:11px;color:#008ca5">'+(links.length>1?esc(approvedRegion(l.region))+' — ':'')+'Official source</a></p>';});
-        if(!links.length)approvedImages(s).forEach(function(url){html+='<div style="text-align:center;margin:12px 0"><img src="'+esc(url)+'" style="max-width:90%;height:auto"></div>';});
+        approvedImages(s).forEach(function(url){html+='<div style="text-align:center;margin:12px 0"><img src="'+esc(url)+'" style="max-width:90%;height:auto"></div>';});
         html+='</section>';
       });
     });
@@ -3414,7 +3414,7 @@ async function approvedPdfVector(list,label,jsPDFCtor){
           next(25);doc.setFont('helvetica','normal');doc.setFontSize(10);doc.setTextColor(8,130,152);
           doc.textWithLink((links.length>1?approvedRegion(link.region)+' - ':'')+'Official source',margin+10,y+9,{url:link.url});y+=25;
         });
-        if(!links.length){
+        {
           var urls=approvedImages(entry);
           for(var j=0;j<urls.length;j++){
             var data=await pdfImageData(urls[j]);
