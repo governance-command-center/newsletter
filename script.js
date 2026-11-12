@@ -5620,7 +5620,7 @@ function renderEmailPane(wrap){
         + '<strong>Featured story (email only)</strong>'
         + '<div class="fieldrow"><label style="flex:1">Featured update<select id="emailFeatureChoice" style="display:block;width:100%;padding:9px;margin-top:7px"></select></label></div>'
         + '<div class="fieldrow"><label style="flex:1">Featured image<select id="emailFeatureImageMode" style="display:block;width:100%;padding:9px;margin-top:7px"><option value="existing">Use selected update image</option><option value="upload">Upload a separate image</option><option value="none">Text only</option></select></label></div>'
-        + '<div id="emailFeatureUploadWrap" style="display:none"><input id="emailFeatureUpload" type="file" accept="image/png,image/jpeg,image/webp"><small>JPG, PNG or WebP, up to 5 MB. Uploaded to the Hub image host.</small></div>'
+        + '<div id="emailFeatureUploadWrap" style="display:none;padding:12px 0"><label for="emailFeatureUpload" class="btn" style="display:inline-block;cursor:pointer;padding:10px 16px;background:#173b65;color:#fff;border-radius:5px;font-weight:600">Choose featured image</label><input id="emailFeatureUpload" type="file" accept="image/png,image/jpeg,image/webp" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden"><div style="font-size:12px;color:#65778a;margin-top:9px">JPG, PNG or WebP, up to 5 MB. Image uploads to the Hub image host.</div></div>'
         + '<p id="emailFeatureImageNote" class="panel__hint"></p>'
       + '</div>'
       + '<div class="adminpanel__row">'
