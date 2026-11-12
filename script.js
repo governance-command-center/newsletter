@@ -3181,11 +3181,11 @@ function approvedEmailHtml(list){
 /* Email is a short digest; full source text stays in the PDF and saved entry. */
 function editorialBodyHtml(entry){
   var paragraphs=[],bullets=[];
-  function clean(v){return String(v||'').replace(/\\s+/g,' ').trim();}
+  function clean(v){return String(v||'').replace(/\s+/g,' ').trim();}
   function add(v,isBullet){
     v=clean(v);if(!v)return;
-    if(isBullet||/^[•*\\-]\\s/.test(v)){
-      v=v.replace(/^[•*\\-]\\s*/,'');
+    if(isBullet||/^[•*\-]\s/.test(v)){
+      v=v.replace(/^[•*\-]\s*/,'');
       if(v&&!bullets.includes(v))bullets.push(v);
     }else if(!paragraphs.includes(v))paragraphs.push(v);
   }
@@ -3203,12 +3203,12 @@ function editorialBodyHtml(entry){
     }else if(b.type==='table'&&b.rows){
       b.rows.forEach(function(row){add(row.join(' | '),false);});
     }else{
-      String(b.text||'').split(/\\n+/).forEach(function(v){add(v,false);});
+      String(b.text||'').split(/\n+/).forEach(function(v){add(v,false);});
     }
   });
-  var full=paragraphs.join(' ').replace(/\\s+/g,' ').trim();
+  var full=paragraphs.join(' ').replace(/\s+/g,' ').trim();
   // Prefer complete sentences, never arbitrary line wraps from the source editor.
-  var sentences=full.match(/[^.!?]+[.!?]+(?=\\s|$)|[^.!?]+$/g)||[];
+  var sentences=full.match(/[^.!?]+[.!?]+(?=\s|$)|[^.!?]+$/g)||[];
   var summary='';
   sentences.forEach(function(part){
     part=clean(part);
@@ -3217,10 +3217,10 @@ function editorialBodyHtml(entry){
     summary+=(summary?' ':'')+part;
   });
   if(!summary)summary=full;
-  if(summary.length>320)summary=summary.slice(0,317).replace(/\\s+\\S*$/,'')+'…';
+  if(summary.length>320)summary=summary.slice(0,317).replace(/\s+\S*$/,'')+'…';
   var out=summary?'<p style="font-size:14px;line-height:1.75;color:#42556a;margin:20px 0 13px">'+esc(summary)+'</p>':'';
   bullets.slice(0,3).forEach(function(value){
-    if(value.length>155)value=value.slice(0,152).replace(/\\s+\\S*$/,'')+'…';
+    if(value.length>155)value=value.slice(0,152).replace(/\s+\S*$/,'')+'…';
     out+='<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 7px"><tr><td valign="top" width="18" style="font-size:14px;line-height:1.6;color:#b28b4c">•</td><td style="font-size:13px;line-height:1.65;color:#42556a">'+esc(value)+'</td></tr></table>';
   });
   return out;
