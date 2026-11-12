@@ -3255,72 +3255,59 @@ function refreshEmailFeatureOptions(){
   var upload=document.getElementById('emailFeatureUploadWrap');if(upload)upload.style.display=emailFeatureImageMode==='upload'?'block':'none';
   var note=document.getElementById('emailFeatureImageNote');if(note)note.textContent=emailFeatureUploadedUrl?'Featured image uploaded.':'Only one image is shown; other updates remain text-only.';
 }
+/* Outlook-first editorial email: a single spotlight, then short supporting stories. */
 function editorialEmailHtml(list){
-  var grouped=approvedGroups(list),period=periodCoveredLabel(list),featured=selectedEmailFeature(list);
-  var regionSet={};
-  list.forEach(function(entry){entryRegions(entry).forEach(function(reg){regionSet[approvedRegion(reg)]=true;});});
-  var regions=Object.keys(regionSet);
-  var html='<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Merchandising Newsletter</title></head>'
-    +'<body style="margin:0;background:#e9edf2;font-family:Arial,Helvetica,sans-serif;color:#102a46">'
-    +'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#e9edf2"><tr><td align="center" style="padding:26px 10px">'
-    +'<table role="presentation" width="680" cellpadding="0" cellspacing="0" style="width:100%;max-width:680px;background:#ffffff">'
-    +'<tr><td style="background:#0d2744;padding:35px 34px 42px;border-top:6px solid #d6b271">'
-    +'<div style="font-size:11px;color:#d9bb82;font-weight:bold;letter-spacing:2px">MERCHANDISING INTELLIGENCE</div>'
-    +'<div style="font-family:Georgia,serif;color:#ffffff;font-size:44px;line-height:1.1;margin-top:28px">Marketplace<br>Updates.</div>'
-    +'<div style="font-size:13px;line-height:1.7;color:#c9d6e3;margin-top:18px">The regional briefing on platform policies,<br>seller operations and marketplace changes.</div>'
-    +'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:30px;border-top:1px solid #486079"><tr><td style="padding-top:15px;font-size:12px;color:#e5ecf3">'+esc(period)+'</td><td align="right" style="padding-top:15px;font-size:12px;color:#e5ecf3">'+esc(regions.join(' · '))+'</td></tr></table></td></tr>'
-    +'<tr><td style="background:#f7f5f0;padding:22px 32px">'
-    +'<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>'
-    +'<td style="padding-top:15px"><div style="font-family:Georgia,serif;font-size:27px;color:#102a46">'+list.length+'</div><div style="font-size:10px;letter-spacing:1px;color:#6c7d8f">UPDATES</div></td>'
-    +'<td style="padding-top:15px"><div style="font-family:Georgia,serif;font-size:27px;color:#102a46">'+grouped.platforms.length+'</div><div style="font-size:10px;letter-spacing:1px;color:#6c7d8f">PLATFORMS</div></td>'
-    +'<td style="padding-top:15px"><div style="font-family:Georgia,serif;font-size:27px;color:#102a46">'+regions.length+'</div><div style="font-size:10px;letter-spacing:1px;color:#6c7d8f">REGIONS</div></td></tr></table></td></tr>'
-    +'<tr><td style="padding:34px 32px 19px"><div style="font-size:10px;font-weight:bold;letter-spacing:2px;color:#b28b4c">IN THIS ISSUE</div>'
-    +'<div style="font-family:Georgia,serif;font-size:27px;color:#102a46;margin-top:8px">What’s changing across marketplaces</div></td></tr>'
-    +'<tr><td style="padding:0 32px 30px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #dde4eb">';
-  if(featured&&featured.url){
-    html+='<tr><td style="padding:0 32px 26px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>'
-      +'<td width="44%" valign="top" style="padding-right:19px"><img src="'+esc(featured.url)+'" width="235" alt="Featured marketplace update" style="display:block;width:100%;max-width:235px;height:auto;border:0"></td>'
-      +'<td valign="middle"><div style="font-size:10px;letter-spacing:2px;color:#a17a3d;font-weight:bold">FEATURED UPDATE</div>'
-      +'<div style="font-family:Georgia,serif;font-size:23px;line-height:1.3;color:#102a46;margin-top:10px">'+esc(featured.entry.title||'Marketplace update')+'</div>'
-      +'<div style="font-size:12px;color:#526477;margin-top:10px">'+esc(featured.entry.platform||'')+' / '+esc(entryRegions(featured.entry).map(approvedRegion).join(', '))+'</div>'
-      +'</td></tr></table></td></tr>';
+  var period=periodCoveredLabel(list),featured=selectedEmailFeature(list);
+  var uniquePlatforms={},uniqueRegions={};
+  list.forEach(function(e){uniquePlatforms[e.platform||'Marketplace']=true;entryRegions(e).forEach(function(r){uniqueRegions[approvedRegion(r)]=true;});});
+  var regions=Object.keys(uniqueRegions),platforms=Object.keys(uniquePlatforms);
+  function cell(text,style){return '<td style="'+style+'">'+text+'</td>';}
+  function source(entry){
+    return approvedLinks(entry).map(function(link){return '<a href="'+esc(link.url)+'" style="font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:bold;color:#173a60;text-decoration:underline">READ OFFICIAL ANNOUNCEMENT →</a>';}).join(' &nbsp; ');
   }
-  var index=0;
-  grouped.platforms.forEach(function(p){
-    approvedRegions(grouped.groups[p]).forEach(function(reg){
-      grouped.groups[p][reg].forEach(function(entry){
-        index++;
-        html+='<tr><td style="padding:13px 0;border-bottom:1px solid #dde4eb;font-size:13px;line-height:1.5;color:#344e67"><strong>'+String(index).padStart(2,'0')+'</strong> &nbsp; '+esc(p==='Tiktok'?'TikTok':p)+' '+esc(approvedRegion(reg))+' — '+esc(entry.title||'Untitled update')+'</td></tr>';
-      });
+  function summary(entry){return editorialBodyHtml(entry);}
+  function story(entry,spotlight){
+    var platform=esc(entry.platform||'Marketplace'),region=esc(entryRegions(entry).map(approvedRegion).join(' · '));
+    var title=esc(entry.title||'Untitled update'),content=summary(entry);
+    var accent=entry.platform==='Shopee'?'#e86b43':entry.platform==='Lazada'?'#6654b8':'#b38b51';
+    var titleStyle='font-family:Georgia,Times New Roman,serif;font-size:'+(spotlight?'26':'21')+'px;line-height:1.3;font-weight:bold;color:#112b47;margin:12px 0';
+    return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%">'
+      +'<tr>'+cell('<span style="font-size:12px;letter-spacing:1px;font-weight:bold;color:'+accent+'">'+platform.toUpperCase()+' / '+region+'</span>','padding:0 0 10px')+'</tr>'
+      +'<tr>'+cell('<h2 style="'+titleStyle+'">'+title+'</h2>','padding:0 0 6px')+'</tr>'
+      +'<tr>'+cell(content,'padding:0 0 14px')+'</tr>'
+      +'<tr>'+cell(source(entry),'padding:6px 0 0')+'</tr></table>';
+  }
+  var html='<!doctype html><html><head><meta charset="utf-8"><title>Merchandising Newsletter</title></head><body style="margin:0;background:#e9edf2">'
+    +'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#e9edf2" style="border-collapse:collapse;background:#e9edf2"><tr><td align="center" style="padding:20px 10px">'
+    +'<table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="border-collapse:collapse;width:640px;background:#ffffff">'
+    +'<tr><td bgcolor="#102b48" style="background:#102b48;border-top:5px solid #d4b076;padding:30px 32px 32px">'
+    +'<p style="font-family:Arial,sans-serif;font-size:12px;letter-spacing:2px;font-weight:bold;color:#e3c18a;margin:0 0 18px">MERCHANDISING NEWSLETTER</p>'
+    +'<h1 style="font-family:Georgia,Times New Roman,serif;font-size:35px;line-height:1.2;font-weight:bold;color:#ffffff;margin:0 0 15px">Marketplace Updates</h1>'
+    +'<p style="font-family:Arial,sans-serif;font-size:13px;color:#dbe5ef;margin:0">'+esc(period)+' &nbsp; | &nbsp; '+esc(regions.join(' · '))+'</p>'
+    +'</td></tr>'
+    +'<tr><td bgcolor="#f7f4ee" style="background:#f7f4ee;padding:20px 32px">'
+    +'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>'
+    +cell('<strong style="font-size:22px;color:#102b48">'+list.length+'</strong><p style="font-size:11px;color:#64758a;margin:5px 0 0">UPDATES</p>','width:33%;font-family:Arial,sans-serif')
+    +cell('<strong style="font-size:22px;color:#102b48">'+platforms.length+'</strong><p style="font-size:11px;color:#64758a;margin:5px 0 0">PLATFORMS</p>','width:33%;font-family:Arial,sans-serif')
+    +cell('<strong style="font-size:22px;color:#102b48">'+regions.length+'</strong><p style="font-size:11px;color:#64758a;margin:5px 0 0">REGIONS</p>','width:34%;font-family:Arial,sans-serif')
+    +'</tr></table></td></tr>';
+  var featuredEntry=featured&&featured.url?featured.entry:null;
+  if(featuredEntry){
+    html+='<tr><td style="padding:30px 32px 16px"><p style="font-family:Arial,sans-serif;font-size:12px;font-weight:bold;letter-spacing:2px;color:#b28b4c;margin:0 0 16px">THE SPOTLIGHT</p>'
+      +'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>'
+      +'<td width="225" valign="top" style="padding:0 20px 0 0"><img src="'+esc(featured.url)+'" width="225" alt="Featured marketplace story" style="display:block;width:225px;max-width:225px;height:auto;border:0"></td>'
+      +'<td valign="top" style="padding:0">'+story(featuredEntry,true)+'</td></tr></table></td></tr>';
+  }
+  var remaining=featuredEntry?list.filter(function(e){return e!==featuredEntry;}):list;
+  if(remaining.length){
+    html+='<tr><td style="padding:24px 32px 8px"><p style="font-family:Arial,sans-serif;font-size:12px;font-weight:bold;letter-spacing:2px;color:#b28b4c;margin:0">OTHER MARKETPLACE UPDATES</p></td></tr>';
+    remaining.forEach(function(entry){
+      html+='<tr><td style="padding:19px 32px 23px;border-bottom:1px solid #e3e8ed">'+story(entry,false)+'</td></tr>';
     });
-  });
-  html+='</table></td></tr>';
-  index=0;
-  grouped.platforms.forEach(function(p){
-    approvedRegions(grouped.groups[p]).forEach(function(reg){
-      grouped.groups[p][reg].forEach(function(entry){
-        index++;
-        var accent=p==='Shopee'?'#f36b36':p==='Lazada'?'#6a52c5':'#087e98';
-        var links=approvedLinks(entry),images=links.length?[]:approvedImages(entry);
-        var formattedBody=editorialBodyHtml(entry);
-        html+='<tr><td style="padding:0 32px 24px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e2e7ed;background:#ffffff">'
-          +'<tr><td style="padding:25px 27px 22px;border-top:4px solid '+accent+'">'
-          +'<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="font-size:11px;font-weight:bold;letter-spacing:1.6px;color:'+accent+'">'+esc(p==='Tiktok'?'TikTok':p).toUpperCase()+' / '+esc(approvedRegion(reg))+'</td>'
-          +'<td align="right" style="font-size:11px;color:#718094">'+String(index).padStart(2,'0')+' / '+String(list.length).padStart(2,'0')+'</td></tr></table>'
-          +'<div style="font-size:11px;font-weight:bold;letter-spacing:1.2px;color:#8793a0;margin-top:20px">MARKETPLACE UPDATE</div>'
-          +'<div style="font-family:Georgia,serif;font-size:24px;line-height:1.25;color:#102a46;margin-top:8px">'+esc(entry.title||'Untitled update')+'</div>';
-        if(formattedBody)html+='<div style="padding-top:20px">'+formattedBody+'</div>';
-        links.forEach(function(link){
-          html+='<div style="margin-top:14px"><a href="'+esc(link.url)+'" style="display:inline-block;background:#102a46;color:#ffffff;font-size:12px;font-weight:bold;text-decoration:none;padding:12px 17px">'+(links.length>1?esc(approvedRegion(link.region))+' — ':'')+'READ OFFICIAL ANNOUNCEMENT →</a></div>';
-        });
-        images.forEach(function(url){html+='<div style="padding-top:14px;text-align:center"><img src="'+esc(url)+'" alt="Marketplace update image" width="520" style="max-width:100%;height:auto;border:0"></div>';});
-        html+='</td></tr></table></td></tr>';
-      });
-    });
-  });
-  return html+'<tr><td style="padding:28px 32px;background:#0d2744;border-top:4px solid #d6b271"><div style="font-size:11px;letter-spacing:2px;color:#d9bb82;font-weight:bold">STAY INFORMED</div>'
-    +'<div style="font-family:Georgia,serif;font-size:22px;color:#ffffff;margin-top:9px">Clarity for every marketplace.</div>'
-    +'<p style="font-size:12px;line-height:1.7;color:#cbd7e3;margin:12px 0 0">Merchandising Newsletter · Marketplace Updates at a Glance<br>For internal operational awareness. Refer to linked official sources for complete guidance.</p>'
+  }
+  return html+'<tr><td bgcolor="#102b48" style="background:#102b48;padding:22px 32px;border-top:4px solid #d4b076">'
+    +'<p style="font-family:Arial,sans-serif;font-size:12px;font-weight:bold;letter-spacing:2px;color:#e3c18a;margin:0 0 8px">STAY INFORMED</p>'
+    +'<p style="font-family:Arial,sans-serif;font-size:13px;color:#dbe5ef;margin:0">Key marketplace updates for our merchandising teams.</p>'
     +'</td></tr></table></td></tr></table></body></html>';
 }
 function approvedPrintHtml(list){
