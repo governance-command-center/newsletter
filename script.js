@@ -915,6 +915,7 @@ var NAV_META = {
   import:   { title: 'Import slides', sub: 'Bring in a PowerPoint deck or a JSON backup.' },
   export:   { title: 'Export & PDF', sub: 'Download the current view as PDF or JSON.' },
   archive:  { title: 'Archive', sub: 'Set aside past entries to keep the current set clean. Restore or export any batch later.' },
+  editorial: { title: 'Editorial Newsletter', sub: 'Bold visual preview from your saved marketplace updates.' },
   email:    { title: 'Newsletter Email', sub: 'A leadership briefing you can preview and paste straight into your inbox.' },
   members:  { title: 'Members', sub: 'Create users and passwords, reset them, and manage who can access this tool.' }
 };
@@ -3765,6 +3766,7 @@ function renderWorkspace(){
   else if (state.nav === 'export') renderExportPane(wrap);
   else if (state.nav === 'archive') renderArchivePane(wrap);
   else if (state.nav === 'email')  renderEmailPane(wrap);
+  else if (state.nav === 'editorial' && window.renderEditorialPane) window.renderEditorialPane(wrap, slides.filter(function(e){return e.status!=='archived' && e.published!==false;}), {esc:esc,regions:entryRegions,link:entryPrimaryLink,text:approvedText,period:periodCoveredLabel});
   else if (state.nav === 'members') renderMembersPane(wrap);
 }
 
