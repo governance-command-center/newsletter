@@ -3177,6 +3177,52 @@ function approvedEmailHtml(list){
 }
 /* Optional magazine-inspired, table-based email layout for Outlook compatibility. */
 /* Magazine-inspired email. Inline/table styling is intentional for Outlook. */
+/* Render stored content as spaced, email-safe paragraphs and bullet rows. */
+function editorialBodyHtml(entry){
+  var out='',body=entry.body||[];
+  function paragraph(value,kind){
+    value=String(value||'').replace(/\s+/g,' ').trim();
+    if(!value)return;
+    if(kind==='list'){
+      out+='<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 5px"><tr><td valign="top" width="17" style="font-size:14px;line-height:1.65;color:#b28b4c">•</td><td style="font-size:14px;line-height:1.7;color:#42556a">'+esc(value.replace(/^[•*\-]\s*/,''))+'</td></tr></table>';
+    }else{
+      out+='<p style="font-size:14px;line-height:1.75;color:#42556a;margin:'+(kind==='heading'?'17px 0 8px':'0 0 14px')+';font-weight:'+(kind==='heading'?'bold':'normal')+'">'+esc(value)+'</p>';
+    }
+  }
+  function walk(node){
+    if(node.nodeType===3){paragraph(node.textContent,'paragraph');return;}
+    if(node.nodeType!==1)return;
+    var tag=node.tagName.toLowerCase();
+    if(tag==='ul'||tag==='ol'){
+      Array.from(node.children).forEach(function(li,i){
+        if(li.tagName.toLowerCase()==='li'){
+          var value=(li.textContent||'').trim();
+          if(tag==='ol')paragraph((i+1)+'. '+value,'paragraph');else paragraph(value,'list');
+        }
+      });return;
+    }
+    if(tag==='br')return;
+    if(tag==='p'||tag==='div'||/^h[1-6]$/.test(tag)||tag==='li'){
+      var value=(node.innerText||node.textContent||'').trim();
+      value.split(/\n+/).forEach(function(v){paragraph(v,tag==='li'?'list':/^h[1-6]$/.test(tag)?'heading':'paragraph');});return;
+    }
+    Array.from(node.childNodes).forEach(walk);
+  }
+  body.forEach(function(b){
+    if(b.type==='image')return;
+    if(b.type==='rich'){
+      var root=document.createElement('div');root.innerHTML=b.html||'';
+      Array.from(root.childNodes).forEach(walk);
+    }else if(b.type==='table'&&b.rows){
+      b.rows.forEach(function(row){paragraph(row.join(' | '),'paragraph');});
+    }else{
+      String(b.text||'').split(/\n+/).forEach(function(v){
+        paragraph(v,/^\s*[•*\-]\s/.test(v)?'list':'paragraph');
+      });
+    }
+  });
+  return out;
+}
 function editorialEmailHtml(list){
   var grouped=approvedGroups(list),period=periodCoveredLabel(list);
   var regionSet={};
@@ -3216,14 +3262,14 @@ function editorialEmailHtml(list){
         index++;
         var accent=p==='Shopee'?'#f36b36':p==='Lazada'?'#6a52c5':'#087e98';
         var links=approvedLinks(entry),images=links.length?[]:approvedImages(entry);
-        var summary=approvedText(entry);
+        var formattedBody=editorialBodyHtml(entry);
         html+='<tr><td style="padding:0 32px 24px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e2e7ed;background:#ffffff">'
           +'<tr><td style="padding:25px 27px 22px;border-top:4px solid '+accent+'">'
           +'<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="font-size:11px;font-weight:bold;letter-spacing:1.6px;color:'+accent+'">'+esc(p==='Tiktok'?'TikTok':p).toUpperCase()+' / '+esc(approvedRegion(reg))+'</td>'
           +'<td align="right" style="font-size:11px;color:#718094">'+String(index).padStart(2,'0')+' / '+String(list.length).padStart(2,'0')+'</td></tr></table>'
           +'<div style="font-size:11px;font-weight:bold;letter-spacing:1.2px;color:#8793a0;margin-top:20px">MARKETPLACE UPDATE</div>'
           +'<div style="font-family:Georgia,serif;font-size:24px;line-height:1.25;color:#102a46;margin-top:8px">'+esc(entry.title||'Untitled update')+'</div>';
-        if(summary)html+='<p style="font-size:14px;line-height:1.8;color:#42556a;margin:20px 0 12px;white-space:pre-line">'+esc(summary)+'</p>';
+        if(formattedBody)html+='<div style="padding-top:20px">'+formattedBody+'</div>';
         links.forEach(function(link){
           html+='<div style="margin-top:14px"><a href="'+esc(link.url)+'" style="display:inline-block;background:#102a46;color:#ffffff;font-size:12px;font-weight:bold;text-decoration:none;padding:12px 17px">'+(links.length>1?esc(approvedRegion(link.region))+' — ':'')+'READ OFFICIAL ANNOUNCEMENT →</a></div>';
         });
