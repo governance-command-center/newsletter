@@ -3217,8 +3217,46 @@ function editorialBodyHtml(entry){
   // A long first sentence is displayed intact rather than producing a misleading fragment.
   return summary?'<p style="font-size:14px;line-height:1.7;color:#42556a;margin:17px 0 13px">'+esc(summary)+'</p>':'';
 }
+/* Email-only featured story controls; settings stay local to this browser. */
+var emailFeatureChoice='auto',emailFeatureImageMode='existing',emailFeatureUploadedUrl='';
+function emailFeatureList(){
+  var list=currentExecScope()==='all'?slides:filteredSlides();
+  return coverageMultiFilter(list,'email');
+}
+function emailFeatureKey(list){return 'newsletter-feature-v1:'+periodCoveredLabel(list);}
+function loadEmailFeature(list){
+  try{
+    var saved=JSON.parse(localStorage.getItem(emailFeatureKey(list))||'{}');
+    emailFeatureChoice=saved.choice||'auto';
+    emailFeatureImageMode=saved.mode||'existing';
+    emailFeatureUploadedUrl=saved.url||'';
+  }catch(e){emailFeatureChoice='auto';emailFeatureImageMode='existing';emailFeatureUploadedUrl='';}
+}
+function saveEmailFeature(){
+  try{localStorage.setItem(emailFeatureKey(emailFeatureList()),JSON.stringify({choice:emailFeatureChoice,mode:emailFeatureImageMode,url:emailFeatureUploadedUrl}));}catch(e){}
+}
+function selectedEmailFeature(list){
+  if(emailFeatureChoice==='none')return null;
+  var entry=emailFeatureChoice==='auto'?list.find(function(e){return approvedImages(e).length>0;}):list.find(function(e){return String(e.id)===emailFeatureChoice;});
+  if(!entry)return null;
+  var url=emailFeatureImageMode==='none'?'':emailFeatureImageMode==='upload'?emailFeatureUploadedUrl:approvedImages(entry)[0]||'';
+  if(!/^https:\/\//i.test(url))url='';
+  return {entry:entry,url:url};
+}
+function refreshEmailFeatureOptions(){
+  var select=document.getElementById('emailFeatureChoice');
+  if(!select)return;
+  var list=emailFeatureList();
+  select.innerHTML='<option value="auto">Automatic — first update with an image</option><option value="none">No featured image</option>'
+    +list.map(function(e){return '<option value="'+esc(String(e.id))+'">'+esc((e.platform||'')+' / '+entryRegions(e).map(approvedRegion).join(', ')+' — '+(e.title||'Untitled'))+'</option>';}).join('');
+  if(emailFeatureChoice!=='auto'&&emailFeatureChoice!=='none'&&!list.some(function(e){return String(e.id)===emailFeatureChoice;}))emailFeatureChoice='auto';
+  select.value=emailFeatureChoice;
+  var mode=document.getElementById('emailFeatureImageMode');if(mode)mode.value=emailFeatureImageMode;
+  var upload=document.getElementById('emailFeatureUploadWrap');if(upload)upload.style.display=emailFeatureImageMode==='upload'?'block':'none';
+  var note=document.getElementById('emailFeatureImageNote');if(note)note.textContent=emailFeatureUploadedUrl?'Featured image uploaded.':'Only one image is shown; other updates remain text-only.';
+}
 function editorialEmailHtml(list){
-  var grouped=approvedGroups(list),period=periodCoveredLabel(list);
+  var grouped=approvedGroups(list),period=periodCoveredLabel(list),featured=selectedEmailFeature(list);
   var regionSet={};
   list.forEach(function(entry){entryRegions(entry).forEach(function(reg){regionSet[approvedRegion(reg)]=true;});});
   var regions=Object.keys(regionSet);
@@ -3239,6 +3277,14 @@ function editorialEmailHtml(list){
     +'<tr><td style="padding:34px 32px 19px"><div style="font-size:10px;font-weight:bold;letter-spacing:2px;color:#b28b4c">IN THIS ISSUE</div>'
     +'<div style="font-family:Georgia,serif;font-size:27px;color:#102a46;margin-top:8px">What’s changing across marketplaces</div></td></tr>'
     +'<tr><td style="padding:0 32px 30px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #dde4eb">';
+  if(featured&&featured.url){
+    html+='<tr><td style="padding:0 32px 26px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>'
+      +'<td width="44%" valign="top" style="padding-right:19px"><img src="'+esc(featured.url)+'" width="235" alt="Featured marketplace update" style="display:block;width:100%;max-width:235px;height:auto;border:0"></td>'
+      +'<td valign="middle"><div style="font-size:10px;letter-spacing:2px;color:#a17a3d;font-weight:bold">FEATURED UPDATE</div>'
+      +'<div style="font-family:Georgia,serif;font-size:23px;line-height:1.3;color:#102a46;margin-top:10px">'+esc(featured.entry.title||'Marketplace update')+'</div>'
+      +'<div style="font-size:12px;color:#526477;margin-top:10px">'+esc(featured.entry.platform||'')+' / '+esc(entryRegions(featured.entry).map(approvedRegion).join(', '))+'</div>'
+      +'</td></tr></table></td></tr>';
+  }
   var index=0;
   grouped.platforms.forEach(function(p){
     approvedRegions(grouped.groups[p]).forEach(function(reg){
@@ -5570,6 +5616,13 @@ function renderEmailPane(wrap){
       + '<div class="fieldrow">'
         + '<label style="flex:1;min-width:240px;">Base URL (optional — makes thumbnails & button clickable)<input type="text" id="emailBaseUrlExec" placeholder="https://yourteam.github.io/platform-updates/" value="'+esc(state.emailBaseUrl)+'"></label>'
       + '</div>'
+      + '<div class="panel" style="margin:16px 0;padding:16px;border:1px solid #dce3eb">'
+        + '<strong>Featured story (email only)</strong>'
+        + '<div class="fieldrow"><label style="flex:1">Featured update<select id="emailFeatureChoice" style="display:block;width:100%;padding:9px;margin-top:7px"></select></label></div>'
+        + '<div class="fieldrow"><label style="flex:1">Featured image<select id="emailFeatureImageMode" style="display:block;width:100%;padding:9px;margin-top:7px"><option value="existing">Use selected update image</option><option value="upload">Upload a separate image</option><option value="none">Text only</option></select></label></div>'
+        + '<div id="emailFeatureUploadWrap" style="display:none"><input id="emailFeatureUpload" type="file" accept="image/png,image/jpeg,image/webp"><small>JPG, PNG or WebP, up to 5 MB. Uploaded to the Hub image host.</small></div>'
+        + '<p id="emailFeatureImageNote" class="panel__hint"></p>'
+      + '</div>'
       + '<div class="adminpanel__row">'
         + '<button type="button" class="btn" id="execGenerateBtn">Generate preview</button>'
       + '</div>'
@@ -5585,6 +5638,25 @@ function renderEmailPane(wrap){
   refreshEmailDates();
   wrap.querySelectorAll('input[name="execScope"]').forEach(function(r){r.addEventListener('change',refreshEmailDates);});
 
+  loadEmailFeature(emailFeatureList());
+  refreshEmailFeatureOptions();
+  var featureSelect=document.getElementById('emailFeatureChoice');
+  featureSelect.addEventListener('change',function(){emailFeatureChoice=this.value;saveEmailFeature();refreshEmailFeatureOptions();});
+  document.getElementById('emailFeatureImageMode').addEventListener('change',function(){emailFeatureImageMode=this.value;saveEmailFeature();refreshEmailFeatureOptions();});
+  document.getElementById('emailFeatureUpload').addEventListener('change',async function(){
+    var file=this.files&&this.files[0];if(!file)return;
+    if(!/^image\/(png|jpeg|webp)$/.test(file.type)||file.size>5*1024*1024){setStatus('Choose a JPG, PNG or WebP image under 5 MB.',false);return;}
+    try{
+      setStatus('Uploading featured image…',true);
+      var data=await new Promise(function(resolve,reject){var reader=new FileReader();reader.onload=function(){resolve(reader.result);};reader.onerror=reject;reader.readAsDataURL(file);});
+      var url=await AUTH.uploadImage(data,file.name);
+      if(!/^https:\/\//i.test(url))throw new Error('Image host did not return a secure URL.');
+      emailFeatureUploadedUrl=url;emailFeatureImageMode='upload';saveEmailFeature();refreshEmailFeatureOptions();
+      setStatus('Featured image uploaded. Generate preview to see it.',true);
+    }catch(err){setStatus('Featured image upload failed: '+(err.message||err),false);}
+  });
+  dateSel.addEventListener('change',function(){loadEmailFeature(emailFeatureList());refreshEmailFeatureOptions();});
+  wrap.querySelectorAll('input[name="execScope"]').forEach(function(r){r.addEventListener('change',function(){loadEmailFeature(emailFeatureList());refreshEmailFeatureOptions();});});
   document.getElementById('emailBaseUrlExec').addEventListener('input', function(e){ state.emailBaseUrl = e.target.value; });
   document.getElementById('execGenerateBtn').addEventListener('click', generateExecEmail);
   if (state.execHtml) renderExecPreview();
