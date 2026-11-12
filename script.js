@@ -3598,6 +3598,24 @@ function emailBodyFragment(fullHtml){
     if(!cell.style.lineHeight)cell.style.lineHeight='1.5';
     if(cell.style.backgroundColor)cell.setAttribute('bgcolor',cell.style.backgroundColor);
   });
+  // Outlook paste can discard CSS on DIV elements. Convert text-only DIVs
+  // into Word-friendly paragraphs with explicit font markup and point sizes.
+  Array.from(wrapper.querySelectorAll('div')).reverse().forEach(function(div){
+    if(div.querySelector('table,div,img'))return;
+    var css=div.style, p=document.createElement('p');
+    var size=parseFloat(css.fontSize)||14;
+    var face=(css.fontFamily||'Arial').replace(/["']/g,'');
+    var color=css.color||'#102a46';
+    p.style.cssText='margin:0 0 8px 0;font-family:'+face+';font-size:'+size+'px;line-height:'+(css.lineHeight||'1.4')+';color:'+color+';'+(css.fontWeight?'font-weight:'+css.fontWeight+';':'');
+    var font=document.createElement('font');
+    font.setAttribute('face',face);
+    font.setAttribute('color',color);
+    font.setAttribute('size',size>=38?'7':size>=27?'6':size>=21?'5':size>=16?'4':size>=12?'3':'2');
+    var span=document.createElement('span');
+    span.style.cssText='font-family:'+face+';font-size:'+size+'px;font-size:'+Math.round(size*.75)+'pt;color:'+color+';'+(css.fontWeight?'font-weight:'+css.fontWeight+';':'');
+    while(div.firstChild)span.appendChild(div.firstChild);
+    font.appendChild(span);p.appendChild(font);div.replaceWith(p);
+  });
   wrapper.querySelectorAll('img').forEach(function(img){
     img.style.display='block';img.style.border='0';
   });
