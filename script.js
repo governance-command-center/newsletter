@@ -3178,48 +3178,50 @@ function approvedEmailHtml(list){
 /* Optional magazine-inspired, table-based email layout for Outlook compatibility. */
 /* Magazine-inspired email. Inline/table styling is intentional for Outlook. */
 /* Render stored content as spaced, email-safe paragraphs and bullet rows. */
+/* Email is a short digest; full source text stays in the PDF and saved entry. */
 function editorialBodyHtml(entry){
-  var out='',body=entry.body||[];
-  function paragraph(value,kind){
-    value=String(value||'').replace(/\s+/g,' ').trim();
-    if(!value)return;
-    if(kind==='list'){
-      out+='<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 5px"><tr><td valign="top" width="17" style="font-size:14px;line-height:1.65;color:#b28b4c">•</td><td style="font-size:14px;line-height:1.7;color:#42556a">'+esc(value.replace(/^[•*\-]\s*/,''))+'</td></tr></table>';
-    }else{
-      out+='<p style="font-size:14px;line-height:1.75;color:#42556a;margin:'+(kind==='heading'?'17px 0 8px':'0 0 14px')+';font-weight:'+(kind==='heading'?'bold':'normal')+'">'+esc(value)+'</p>';
-    }
+  var paragraphs=[],bullets=[];
+  function clean(v){return String(v||'').replace(/\\s+/g,' ').trim();}
+  function add(v,isBullet){
+    v=clean(v);if(!v)return;
+    if(isBullet||/^[•*\\-]\\s/.test(v)){
+      v=v.replace(/^[•*\\-]\\s*/,'');
+      if(v&&!bullets.includes(v))bullets.push(v);
+    }else if(!paragraphs.includes(v))paragraphs.push(v);
   }
-  function walk(node){
-    if(node.nodeType===3){paragraph(node.textContent,'paragraph');return;}
-    if(node.nodeType!==1)return;
-    var tag=node.tagName.toLowerCase();
-    if(tag==='ul'||tag==='ol'){
-      Array.from(node.children).forEach(function(li,i){
-        if(li.tagName.toLowerCase()==='li'){
-          var value=(li.textContent||'').trim();
-          if(tag==='ol')paragraph((i+1)+'. '+value,'paragraph');else paragraph(value,'list');
-        }
-      });return;
-    }
-    if(tag==='br')return;
-    if(tag==='p'||tag==='div'||/^h[1-6]$/.test(tag)||tag==='li'){
-      var value=(node.innerText||node.textContent||'').trim();
-      value.split(/\n+/).forEach(function(v){paragraph(v,tag==='li'?'list':/^h[1-6]$/.test(tag)?'heading':'paragraph');});return;
-    }
-    Array.from(node.childNodes).forEach(walk);
-  }
-  body.forEach(function(b){
+  (entry.body||[]).forEach(function(b){
     if(b.type==='image')return;
     if(b.type==='rich'){
       var root=document.createElement('div');root.innerHTML=b.html||'';
-      Array.from(root.childNodes).forEach(walk);
-    }else if(b.type==='table'&&b.rows){
-      b.rows.forEach(function(row){paragraph(row.join(' | '),'paragraph');});
-    }else{
-      String(b.text||'').split(/\n+/).forEach(function(v){
-        paragraph(v,/^\s*[•*\-]\s/.test(v)?'list':'paragraph');
+      root.querySelectorAll('li').forEach(function(li){add(li.textContent,true);});
+      root.querySelectorAll('li').forEach(function(li){li.remove();});
+      root.querySelectorAll('p,div,h1,h2,h3,h4,h5,h6').forEach(function(node){
+        if(node.querySelector('p,div,h1,h2,h3,h4,h5,h6'))return;
+        add(node.textContent,false);
       });
+      if(!paragraphs.length)add(root.textContent,false);
+    }else if(b.type==='table'&&b.rows){
+      b.rows.forEach(function(row){add(row.join(' | '),false);});
+    }else{
+      String(b.text||'').split(/\\n+/).forEach(function(v){add(v,false);});
     }
+  });
+  var full=paragraphs.join(' ').replace(/\\s+/g,' ').trim();
+  // Prefer complete sentences, never arbitrary line wraps from the source editor.
+  var sentences=full.match(/[^.!?]+[.!?]+(?=\\s|$)|[^.!?]+$/g)||[];
+  var summary='';
+  sentences.forEach(function(part){
+    part=clean(part);
+    if(!part||summary.length>=260)return;
+    if(summary && summary.length+part.length>300)return;
+    summary+=(summary?' ':'')+part;
+  });
+  if(!summary)summary=full;
+  if(summary.length>320)summary=summary.slice(0,317).replace(/\\s+\\S*$/,'')+'…';
+  var out=summary?'<p style="font-size:14px;line-height:1.75;color:#42556a;margin:20px 0 13px">'+esc(summary)+'</p>':'';
+  bullets.slice(0,3).forEach(function(value){
+    if(value.length>155)value=value.slice(0,152).replace(/\\s+\\S*$/,'')+'…';
+    out+='<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 7px"><tr><td valign="top" width="18" style="font-size:14px;line-height:1.6;color:#b28b4c">•</td><td style="font-size:13px;line-height:1.65;color:#42556a">'+esc(value)+'</td></tr></table>';
   });
   return out;
 }
