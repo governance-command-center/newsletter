@@ -3581,7 +3581,27 @@ function emailBodyFragment(fullHtml){
   // removing the surrounding blue margin visible in the approved newsletter.
   // Tables with bgcolor and inline background survive Outlook's Word renderer
   // more consistently than body background styles.
-  return inner;
+  // Outlook's Word-based editor drops some CSS inheritance. Apply font,
+  // sizing and background directly to each table cell in the copied fragment.
+  var wrapper=document.createElement('div');
+  wrapper.innerHTML=inner;
+  wrapper.querySelectorAll('table').forEach(function(table){
+    table.setAttribute('cellpadding',table.getAttribute('cellpadding')||'0');
+    table.setAttribute('cellspacing',table.getAttribute('cellspacing')||'0');
+    table.setAttribute('border','0');
+    table.style.borderCollapse='collapse';
+    if(table.style.backgroundColor)table.setAttribute('bgcolor',table.style.backgroundColor);
+  });
+  wrapper.querySelectorAll('td').forEach(function(cell){
+    if(!cell.style.fontFamily)cell.style.fontFamily='Arial,Helvetica,sans-serif';
+    if(!cell.style.fontSize)cell.style.fontSize='14px';
+    if(!cell.style.lineHeight)cell.style.lineHeight='1.5';
+    if(cell.style.backgroundColor)cell.setAttribute('bgcolor',cell.style.backgroundColor);
+  });
+  wrapper.querySelectorAll('img').forEach(function(img){
+    img.style.display='block';img.style.border='0';
+  });
+  return wrapper.innerHTML;
 }
 
 // Writes the styled email to the clipboard as BOTH rich HTML and plain text.
