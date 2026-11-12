@@ -1,0 +1,28 @@
+(function(){
+'use strict';
+function b64utf8(s){var bytes=new TextEncoder().encode(s),out='';for(var i=0;i<bytes.length;i+=8192)out+=String.fromCharCode.apply(null,bytes.subarray(i,i+8192));return btoa(out);}
+function fold(s){return (s.match(/.{1,76}/g)||[]).join('\r\n');}
+function wrap(ctx,str,max){var words=String(str||'').split(/\s+/),lines=[],line='';words.forEach(function(w){if(ctx.measureText(line?line+' '+w:w).width>max&&line){lines.push(line);line=w;}else line+=(line?' ':'')+w;});if(line)lines.push(line);return lines;}
+function tile(w,h,draw){var c=document.createElement('canvas');c.width=w*2;c.height=h*2;var x=c.getContext('2d');x.scale(2,2);draw(x,w,h);return c.toDataURL('image/png').split(',')[1];}
+function txt(x,s,px,weight,color,left,top,width,maxLines,lineHeight){x.font=weight+' '+px+'px Arial';x.fillStyle=color;var lines=wrap(x,s,width);lines.slice(0,maxLines||99).forEach(function(line,i){x.fillText(line,left,top+i*(lineHeight||px*1.25));});}
+function panel(e,helpers,idx){var platform=String(e.platform||'').toLowerCase();var color={shopee:'#ee4d2d',lazada:'#253fc7',tiktok:'#17191f',zalora:'#4b3d67'}[platform]||'#334155';return tile(310,230,function(x,w,h){x.fillStyle=color;x.fillRect(0,0,w,h);txt(x,(e.platform||'')+' / '+helpers.regions(e).join(', '),12,'bold','#ffffff',18,25,w-36,1);txt(x,e.title,21,'bold','#ffffff',18,65,w-36,4,25);txt(x,helpers.text(e).slice(0,130),12,'normal','#ffffff',18,163,w-36,3,16);x.fillStyle='#ffffff';x.fillRect(18,198,163,23);txt(x,helpers.link(e)?'READ OFFICIAL UPDATE  >':'MARKETPLACE NOTICE',10,'bold',color,25,214,150,1);});}
+function rowImage(e,helpers,index){return tile(632,77,function(x,w,h){x.fillStyle='#ffffff';x.fillRect(0,0,w,h);x.fillStyle='#20cdd8';x.fillRect(0,0,5,h);txt(x,String(index+1).padStart(2,'0'),15,'bold','#0e91a5',16,29,40,1);txt(x,(e.platform||'').toUpperCase()+' / '+helpers.regions(e).join(', '),11,'bold','#66768c',56,21,540,1);txt(x,e.title,16,'bold','#14263f',56,49,560,1);});}
+function heading(title,sub){return tile(632,65,function(x,w,h){x.fillStyle='#102039';x.fillRect(0,0,w,h);txt(x,title,23,'bold','#ffffff',20,41,330,1);txt(x,sub,12,'normal','#ffffff',340,40,275,1);});}
+function header(period,count,platforms){return tile(632,180,function(x,w,h){x.fillStyle='#102039';x.fillRect(0,0,w,h);txt(x,'MERCHANDISING INTELLIGENCE / VISUAL EDITION',11,'bold','#23d6e3',24,28,580,1);txt(x,'THE MERCHANDISING',38,'bold','#ffffff',24,89,580,1);txt(x,'EDIT.',42,'bold','#23d6e3',24,135,570,1);txt(x,period+'  •  '+platforms+' PLATFORMS  •  '+count+' UPDATES',12,'normal','#ffffff',24,165,580,1);});}
+function safeUrl(s){return /^https:\/\//i.test(String(s||''))?String(s):'';}
+window.exportEditorialEml=function(featured,linked,notices,helpers,period){
+ var parts=[],imgs=[],n=0;
+ function addImage(data,width,href){var cid='edit'+(++n)+'@newsletter';imgs.push({cid:cid,data:data});return '<td style="padding:4px"'+(width?' width="'+width+'"':'')+'>'+(href?'<a href="'+href.replace(/&/g,'&amp;').replace(/"/g,'&quot;')+'">':'')+'<img src="cid:'+cid+'" width="'+(width||632)+'" style="display:block;width:100%;max-width:'+(width||632)+'px;height:auto;border:0" alt="Newsletter panel">'+(href?'</a>':'')+'</td>';}
+ function line(data,href){parts.push('<tr>'+addImage(data,632,href)+'</tr>');}
+ line(header(period,featured.length+linked.length+notices.length,new Set(featured.concat(linked,notices).map(function(e){return e.platform;})).size));
+ line(heading('THE BRIEF','Featured marketplace updates'));
+ for(var i=0;i<featured.length;i+=2){var cells=addImage(panel(featured[i],helpers,i),310,safeUrl(helpers.link(featured[i])));if(featured[i+1])cells+=addImage(panel(featured[i+1],helpers,i+1),310,safeUrl(helpers.link(featured[i+1])));parts.push('<tr>'+cells+'</tr>');}
+ line(heading('NEWS WIRE',linked.length+' linked updates'));
+ linked.forEach(function(e,i){line(rowImage(e,helpers,i),safeUrl(helpers.link(e)));});
+ if(notices.length){line(heading('VISUAL BULLETIN',notices.length+' advisory notices'));notices.forEach(function(e){line(rowImage(e,helpers,0));(e.body||[]).filter(function(b){return b.type==='image'&&b.dataUrl;}).forEach(function(b){var match=/^data:image\/(png|jpeg);base64,(.+)$/i.exec(b.dataUrl);if(match){var cid='edit'+(++n)+'@newsletter';imgs.push({cid:cid,data:match[2],type:match[1]==='jpeg'?'jpeg':'png'});parts.push('<tr><td style="padding:8px"><img src="cid:'+cid+'" width="610" style="display:block;width:100%;max-width:610px;height:auto" alt="Advisory artwork"></td></tr>');}});});}
+ var html='<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0;background:#edf2f7"><table role="presentation" cellpadding="0" cellspacing="0" border="0" width="640" style="width:640px;max-width:100%;margin:auto;background:#edf2f7">'+parts.join('')+'</table></body></html>';
+ var boundary='edit_'+Date.now(),eml='MIME-Version: 1.0\r\nSubject: The Merchandising Edit - '+period.replace(/[\r\n]/g,' ')+'\r\nContent-Type: multipart/related; boundary="'+boundary+'"; type="text/html"\r\n\r\n--'+boundary+'\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n'+fold(b64utf8(html))+'\r\n';
+ imgs.forEach(function(img){eml+='--'+boundary+'\r\nContent-Type: image/'+(img.type||'png')+'\r\nContent-Transfer-Encoding: base64\r\nContent-ID: <'+img.cid+'>\r\nContent-Disposition: inline\r\n\r\n'+fold(img.data)+'\r\n';});eml+='--'+boundary+'--\r\n';
+ var url=URL.createObjectURL(new Blob([eml],{type:'message/rfc822'}));var a=document.createElement('a');a.href=url;a.download='The_Merchandising_Edit_Outlook.eml';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url);},5000);
+};
+})();
