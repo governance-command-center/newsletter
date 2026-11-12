@@ -3270,10 +3270,10 @@ function editorialEmailHtml(list){
     var platform=esc(entry.platform||'Marketplace'),region=esc(entryRegions(entry).map(approvedRegion).join(' · '));
     var title=esc(entry.title||'Untitled update'),content=summary(entry);
     var accent=entry.platform==='Shopee'?'#e86b43':entry.platform==='Lazada'?'#6654b8':'#b38b51';
-    var titleStyle='font-family:Georgia,Times New Roman,serif;font-size:'+(spotlight?'26':'21')+'px;line-height:1.3;font-weight:bold;color:#112b47;margin:12px 0';
+    var titleStyle='font-family:Georgia,serif;font-size:'+(spotlight?'27':'22')+'px;line-height:1.35;font-weight:normal;color:#112b47;margin:12px 0';
     return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%">'
-      +'<tr>'+cell('<span style="font-size:12px;letter-spacing:1px;font-weight:bold;color:'+accent+'">'+platform.toUpperCase()+' / '+region+'</span>','padding:0 0 10px')+'</tr>'
-      +'<tr>'+cell('<h2 style="'+titleStyle+'">'+title+'</h2>','padding:0 0 6px')+'</tr>'
+      +'<tr>'+cell('<span style="font-family:Arial,sans-serif;font-size:10px;letter-spacing:2px;font-weight:bold;color:'+accent+'">'+platform.toUpperCase()+' / '+region+'</span>','padding:0 0 10px')+'</tr>'
+      +'<tr>'+cell('<h2 style="'+titleStyle+'"><font face="Georgia" color="#112b47" size="'+(spotlight?'5':'4')+'">'+title+'</font></h2>','padding:0 0 6px')+'</tr>'
       +'<tr>'+cell(content,'padding:0 0 14px')+'</tr>'
       +'<tr>'+cell(source(entry),'padding:6px 0 0')+'</tr></table>';
   }
@@ -3282,7 +3282,7 @@ function editorialEmailHtml(list){
     +'<table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="border-collapse:collapse;width:640px;background:#ffffff">'
     +'<tr><td bgcolor="#102b48" style="background:#102b48;border-top:5px solid #d4b076;padding:30px 32px 32px">'
     +'<p style="font-family:Arial,sans-serif;font-size:12px;letter-spacing:2px;font-weight:bold;color:#e3c18a;margin:0 0 18px">MERCHANDISING NEWSLETTER</p>'
-    +'<h1 style="font-family:Georgia,Times New Roman,serif;font-size:35px;line-height:1.2;font-weight:bold;color:#ffffff;margin:0 0 15px">Marketplace Updates</h1>'
+    +'<h1 style="font-family:Georgia,Times New Roman,serif;font-size:35px;line-height:1.2;font-weight:normal;color:#ffffff;margin:0 0 15px"><font face="Georgia" size="7" color="#ffffff">Marketplace Updates</font></h1>'
     +'<p style="font-family:Arial,sans-serif;font-size:13px;color:#dbe5ef;margin:0">'+esc(period)+' &nbsp; | &nbsp; '+esc(regions.join(' · '))+'</p>'
     +'</td></tr>'
     +'<tr><td bgcolor="#f7f4ee" style="background:#f7f4ee;padding:20px 32px">'
@@ -3293,16 +3293,16 @@ function editorialEmailHtml(list){
     +'</tr></table></td></tr>';
   var featuredEntry=featured&&featured.url?featured.entry:null;
   if(featuredEntry){
-    html+='<tr><td style="padding:30px 32px 16px"><p style="font-family:Arial,sans-serif;font-size:12px;font-weight:bold;letter-spacing:2px;color:#b28b4c;margin:0 0 16px">THE SPOTLIGHT</p>'
+    html+='<tr><td style="padding:34px 32px 22px"><p style="font-family:Arial,sans-serif;font-size:11px;font-weight:bold;letter-spacing:2px;color:#a17b45;margin:0 0 16px">THE SPOTLIGHT</p>'
       +'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>'
       +'<td width="225" valign="top" style="padding:0 20px 0 0"><img src="'+esc(featured.url)+'" width="225" alt="Featured marketplace story" style="display:block;width:225px;max-width:225px;height:auto;border:0"></td>'
       +'<td valign="top" style="padding:0">'+story(featuredEntry,true)+'</td></tr></table></td></tr>';
   }
   var remaining=featuredEntry?list.filter(function(e){return e!==featuredEntry;}):list;
   if(remaining.length){
-    html+='<tr><td style="padding:24px 32px 8px"><p style="font-family:Arial,sans-serif;font-size:12px;font-weight:bold;letter-spacing:2px;color:#b28b4c;margin:0">OTHER MARKETPLACE UPDATES</p></td></tr>';
+    html+='<tr><td style="padding:30px 32px 8px"><p style="font-family:Arial,sans-serif;font-size:12px;font-weight:bold;letter-spacing:2px;color:#b28b4c;margin:0">OTHER MARKETPLACE UPDATES</p></td></tr>';
     remaining.forEach(function(entry){
-      html+='<tr><td style="padding:19px 32px 23px;border-bottom:1px solid #e3e8ed">'+story(entry,false)+'</td></tr>';
+      html+='<tr><td style="padding:23px 32px 28px;border-bottom:1px solid #e3e8ed">'+story(entry,false)+'</td></tr>';
     });
   }
   return html+'<tr><td bgcolor="#102b48" style="background:#102b48;padding:22px 32px;border-top:4px solid #d4b076">'
