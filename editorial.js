@@ -1,0 +1,28 @@
+(function(){
+'use strict';
+window.renderEditorialPane = function(wrap, entries, helpers){
+  var esc=helpers.esc, regions=helpers.regions, link=helpers.link, text=helpers.text, period=helpers.period;
+  var chosen=[], current=[];
+  function selectEntries(){
+    var keys=Array.from(new Set(entries.map(function(e){return e.date_range||e.date||'Unspecified';}))).sort().reverse();
+    wrap.innerHTML='<div class="panel"><h2 class="panel__title">The Merchandising Edit — Visual Edition</h2><p class="panel__hint">Uses saved updates. Choose coverage and up to four featured stories; the remaining entries become a linked News Wire or image bulletin.</p><label>Coverage period <select id="edCoverage"></select></label><div id="edSelect"></div><div style="margin:16px 0"><button class="btn" id="edBuild">Generate editorial preview</button></div><div id="edPreview"></div></div>';
+    var sel=wrap.querySelector('#edCoverage');sel.innerHTML='<option value="__all__">All saved updates</option>'+keys.map(function(k){return '<option value="'+esc(k)+'">'+esc(k)+'</option>';}).join('');
+    function redraw(){
+      current=entries.filter(function(e){return sel.value==='__all__'||(e.date_range||e.date||'Unspecified')===sel.value;});
+      chosen=chosen.filter(function(id){return current.some(function(e){return String(e.id)===id;});});
+      wrap.querySelector('#edSelect').innerHTML='<p style="margin:16px 0 8px">Select 3–4 highlights (maximum four)</p><div style="max-height:260px;overflow:auto;border:1px solid #d5e1e8;padding:12px;border-radius:8px">'+current.map(function(e){var checked=chosen.includes(String(e.id));return '<label style="display:block;padding:5px"><input type="checkbox" data-ed-id="'+esc(String(e.id))+'" '+(checked?'checked':'')+'> '+esc(e.platform+' / '+regions(e).join(', ')+' — '+e.title)+'</label>';}).join('')+'</div>';
+      wrap.querySelectorAll('[data-ed-id]').forEach(function(c){c.onchange=function(){var id=c.getAttribute('data-ed-id');if(c.checked){if(chosen.length>=4){c.checked=false;alert('Select up to four highlights.');return;}chosen.push(id);}else chosen=chosen.filter(function(x){return x!==id;});};});
+    }
+    sel.onchange=redraw;redraw();
+    wrap.querySelector('#edBuild').onclick=function(){var picks=chosen.length?chosen:current.slice(0,4).map(function(e){return String(e.id);});var featured=picks.map(function(id){return current.find(function(e){return String(e.id)===id;});}).filter(Boolean);var rest=current.filter(function(e){return !picks.includes(String(e.id));});var linked=rest.filter(function(e){return !!link(e);});var notices=rest.filter(function(e){return !link(e);});var colors=['#e94a19','#e85b20','#14263f','#4232bd'];var out='<div id="edCanvas" style="max-width:740px;background:#f5f7fa;color:#13233a;font-family:Arial,sans-serif;margin:20px auto"><header style="background:#101f35;color:white;padding:35px"><div style="font-size:12px;letter-spacing:2px;color:#28d8e5">MERCHANDISING INTELLIGENCE / VISUAL EDITION</div><div style="font-size:44px;font-weight:900;line-height:1.05;margin:15px 0">THE<br>MERCHANDISING<br><span style="color:#26d7e3">EDIT.</span></div><div>'+esc(period(current))+' &nbsp; • &nbsp; '+new Set(current.map(function(e){return e.platform;})).size+' PLATFORMS &nbsp; • &nbsp; '+current.length+' UPDATES</div></header><section style="padding:22px"><h2 style="font-size:24px">THE BRIEF <small style="font-size:13px;font-weight:normal"> / Four changes worth your attention</small></h2><div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px">';
+      featured.forEach(function(e,i){var href=link(e);out+='<article style="background:'+colors[i%4]+';color:white;padding:22px;min-height:205px;border-radius:14px"><div style="font-size:12px;font-weight:bold">'+esc(e.platform.toUpperCase()+' / '+regions(e).join(', '))+'</div><h3 style="font-size:23px;line-height:1.15;margin:20px 0 10px">'+esc(e.title)+'</h3><p style="font-size:13px;line-height:1.5">'+esc(text(e).slice(0,185))+'</p>'+(href?'<a target="_blank" rel="noopener noreferrer" href="'+esc(href)+'" style="display:inline-block;background:white;color:#14263f;padding:10px;border-radius:20px;font-weight:bold;font-size:12px">READ OFFICIAL UPDATE ↗</a>':'<span style="font-size:12px">ADVISORY ONLY</span>')+'</article>';});
+      out+='</div><h2 style="margin-top:30px">NEWS WIRE <small style="font-size:13px;font-weight:normal"> / '+linked.length+' linked updates</small></h2>';
+      linked.forEach(function(e,i){out+='<a target="_blank" rel="noopener noreferrer" href="'+esc(link(e))+'" style="display:block;padding:13px;margin:5px 0;background:white;color:#15263e;text-decoration:none;border-left:5px solid #20cdd8"><small>'+esc(e.platform+' / '+regions(e).join(', '))+'</small><br><b>'+esc(e.title)+'</b> &nbsp; ↗</a>';});
+      if(notices.length){out+='<h2 style="margin-top:30px">VISUAL BULLETIN <small style="font-size:13px;font-weight:normal"> / '+notices.length+' unlinked notices</small></h2><div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px">';notices.forEach(function(e){out+='<div style="background:white;padding:14px;border-radius:10px"><small>'+esc(e.platform+' / '+regions(e).join(', '))+'</small><h3>'+esc(e.title)+'</h3><p>'+esc(text(e).slice(0,140))+'</p></div>';});out+='</div>';}
+      out+='</section></div><p class="panel__hint">Preview only: Outlook-safe image export and bulletin gallery require a separate rendering step. Existing email and PDF modes remain unchanged.</p>';
+      wrap.querySelector('#edPreview').innerHTML=out;
+    };
+  }
+  selectEntries();
+};
+})();
