@@ -3668,12 +3668,21 @@ function renderExecPreview(){
     '<div class="emailpreview">'
       + '<div class="emailpreview__bar">'
         + '<span class="emailpreview__label">Email preview</span>'
+        + '<button type="button" class="btn" id="execOutlookDownloadBtn">Download for Classic Outlook (.html)</button>'
         + '<button type="button" class="btn copybtn" id="execCopyBtn"><span class="copybtn__toast">Copied — paste into your email</span>Copy for email</button>'
       + '</div>'
       + '<iframe id="execPreviewFrame" title="Executive email preview"></iframe>'
     + '</div>';
 
   document.getElementById('execPreviewFrame').srcdoc = state.execHtml;
+
+  document.getElementById('execOutlookDownloadBtn').addEventListener('click', function(){
+    var html=state.execHtml;
+    if(!html){setStatus('Generate an email preview first.',false);return;}
+    var name='merchandising-newsletter-classic-outlook-'+new Date().toISOString().slice(0,10)+'.html';
+    download(name,html,'text/html;charset=utf-8');
+    setStatus('Downloaded the HTML email. In Classic Outlook: New Email → Insert → Attach File → Browse This PC → select the HTML file → choose Insert as Text from the Insert dropdown. Check the draft before sending.',true);
+  });
 
   document.getElementById('execCopyBtn').addEventListener('click', function(){
     var btn = this;
@@ -5628,7 +5637,7 @@ function renderEmailPane(wrap){
   wrap.innerHTML =
     '<div class="panel">'
       + '<div class="panel__head"><h2 class="panel__title">Generate email</h2></div>'
-      + '<p class="panel__hint">A short, leadership-facing briefing: reporting period, an auto-generated summary, per-platform counts and the top updates that need attention — each tagged with its platform-coloured badge (LZD in blue, SHP in orange, TTS in black, ZLR in purple). Set a base URL to make the "Open Interactive Newsletter" button clickable. When you hit <strong>Copy for email</strong>, the styled briefing — links live — is placed on your clipboard so it pastes into Gmail or Outlook exactly as previewed.</p>'
+      + '<p class="panel__hint">A short, leadership-facing briefing: reporting period, an auto-generated summary, per-platform counts and the top updates that need attention — each tagged with its platform-coloured badge (LZD in blue, SHP in orange, TTS in black, ZLR in purple). Set a base URL to make the "Open Interactive Newsletter" button clickable. For Classic Outlook desktop, try <strong>Download for Classic Outlook (.html)</strong> and insert the file as text in a new email. Outlook may still adjust formatting; review the draft before sending. Copy for email remains available as a fallback.</p>'
       + '<div class="scopepick">'
         + '<label><input type="radio" name="execScope" value="filtered" checked> Current filtered view ('+filteredSlides().length+')</label>'
         + '<label><input type="radio" name="execScope" value="all"> All slides ('+slides.length+')</label>'
