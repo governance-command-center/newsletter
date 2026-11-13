@@ -37,7 +37,7 @@ $('editable').addEventListener('input',()=>{dirty=true;$('saveStatus').textConte
 $('toolbar').addEventListener('mousedown',e=>{if(e.target.closest('button'))e.preventDefault()});
 $('toolbar').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;$('editable').focus();if(b.dataset.cmd==='removeFormat'){document.execCommand('removeFormat',false,null)}else if(b.dataset.cmd==='hiliteColor'){document.execCommand('hiliteColor',false,b.dataset.value||'#fff0aa')}else if(b.dataset.cmd==='insertUnorderedList'||b.dataset.cmd==='insertOrderedList'){
 const sel=window.getSelection(),range=sel&&sel.rangeCount?sel.getRangeAt(0):null;
-const lines=sel?sel.toString().split(/\\r?\\n/).map(x=>x.trim()).filter(Boolean):[];
+const lines=sel?sel.toString().split(/\r?\n/).map(x=>x.trim()).filter(Boolean):[];
 if(range&&!range.collapsed&&lines.length>1){
  const tag=b.dataset.cmd==='insertOrderedList'?'ol':'ul';
  const escapeText=x=>x.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
