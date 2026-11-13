@@ -35,7 +35,15 @@ function switchPerson(n){if(editing&&dirty&&!confirm('Discard unsaved changes?')
 $('editBtn').onclick=()=>{if(editing&&dirty&&!confirm('Discard unsaved changes?'))return;editing=!editing;dirty=false;show()};
 $('editable').addEventListener('input',()=>{dirty=true;$('saveStatus').textContent='Unsaved changes'});
 $('toolbar').addEventListener('mousedown',e=>{if(e.target.closest('button'))e.preventDefault()});
-$('toolbar').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;$('editable').focus();if(b.dataset.cmd==='removeFormat'){document.execCommand('removeFormat',false,null)}else if(b.dataset.cmd==='hiliteColor'){document.execCommand('hiliteColor',false,b.dataset.value||'#fff0aa')}else{document.execCommand(b.dataset.cmd,false,b.dataset.value||null)}dirty=true;$('saveStatus').textContent='Unsaved changes'});
+$('toolbar').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;$('editable').focus();if(b.dataset.cmd==='removeFormat'){document.execCommand('removeFormat',false,null)}else if(b.dataset.cmd==='hiliteColor'){document.execCommand('hiliteColor',false,b.dataset.value||'#fff0aa')}else if(b.dataset.cmd==='insertUnorderedList'||b.dataset.cmd==='insertOrderedList'){
+const sel=window.getSelection(),range=sel&&sel.rangeCount?sel.getRangeAt(0):null;
+const lines=sel?sel.toString().split(/\\r?\\n/).map(x=>x.trim()).filter(Boolean):[];
+if(range&&!range.collapsed&&lines.length>1){
+ const tag=b.dataset.cmd==='insertOrderedList'?'ol':'ul';
+ const escapeText=x=>x.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+ document.execCommand('insertHTML',false,'<'+tag+'>'+lines.map(x=>'<li>'+escapeText(x)+'</li>').join('')+'</'+tag+'>');
+}else document.execCommand(b.dataset.cmd,false,null);
+}else{document.execCommand(b.dataset.cmd,false,b.dataset.value||null)}dirty=true;$('saveStatus').textContent='Unsaved changes'});
 $('saveBtn').onclick=async()=>{if(busy)return;busy=true;$('saveBtn').disabled=true;$('saveStatus').textContent='Saving…';try{const existing=getRow();const cleaned=safe($('editable').innerHTML);const result=await api({operation:'save',week,user_id:selected,admin_override:selected!==me,expected_updated_at:existing?.updated_at||null,content:cleaned.trim()?[cleaned]:[]});rows=rows.filter(r=>r.user_id!==selected);rows.push({user_id:selected,content:cleaned.trim()?[cleaned]:[],updated_at:result.updated_at});editing=false;dirty=false;$('saveStatus').textContent='Saved';$('summary').textContent=members.length+' presenters · '+rows.filter(r=>r.content?.some(Boolean)).length+' with topics';show();alertMsg('Weekly topics saved')}catch(e){$('saveStatus').textContent='Save failed';alertMsg(e.message)}finally{busy=false;$('saveBtn').disabled=false}};
 $('present').onclick=()=>{if(editing&&dirty&&!confirm('Discard unsaved changes?'))return;editing=false;dirty=false;document.body.classList.toggle('presentation');$('present').textContent=document.body.classList.contains('presentation')?'Exit presentation':'Present ↗';show()};
 document.addEventListener('keydown',e=>{if(document.body.classList.contains('presentation')&&e.key==='Escape'){$('present').click()}else if(document.body.classList.contains('presentation')&&e.key==='ArrowRight')switchPerson(1);else if(document.body.classList.contains('presentation')&&e.key==='ArrowLeft')switchPerson(-1)});
