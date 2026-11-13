@@ -23,3 +23,32 @@
 .toolbar{background:#faf9f6;border:1px solid #ece8e1;border-radius:6px;padding:9px;margin:15px 0 12px}
 .toolbar button{border-color:transparent;background:transparent}
 .toolbar button:hover{background:#eeeae1}
+
+/* Weekly Focus presentation polish — display-only, blue-aligned. */
+:root{--focus-blue:#527b9c;--focus-soft:#eaf0f6}
+body{background:#f0f3f6}
+.paper{border-color:#dfe7ee;box-shadow:0 24px 68px rgba(25,43,64,.09);border-radius:10px}
+.paper:before{background:linear-gradient(90deg,transparent,#7297b5 30%,#7297b5 70%,transparent);opacity:.65}
+.people button.has{border-bottom-color:#7297b5}
+.people button:hover:not(.active){border-color:#a8bdcf;background:#f2f6fa}
+.eyebrow{color:#587d9d}
+.viewer{line-height:1.75}
+.viewer h2,.viewer h3{color:#192b40}
+.viewer h2{font-size:1.35em}.viewer h3{font-size:1.13em}
+.viewer ul,.viewer ol{margin:.55em 0 1.05em;padding-left:1.5em}
+.viewer li{padding-left:.25em;margin:.28em 0}
+.viewer li::marker{color:#648aaa}
+.viewer .focus-topic{border-left:2px solid #7397b5;background:linear-gradient(90deg,#f6f9fc,#fff 80%);border-radius:0 7px 7px 0;padding:18px 22px;margin:0 0 18px}
+.viewer .focus-topic-label{display:block;font:700 10px 'DM Sans',sans-serif;letter-spacing:.16em;color:#527b9c;margin-bottom:10px}
+.viewer .focus-topic>h2,.viewer .focus-topic>h3{margin:.2em 0 .65em}
+.viewer .focus-topic p:last-child,.viewer .focus-topic div:last-child{margin-bottom:0}
+.person-heading{display:flex;align-items:center;gap:13px}
+.person-initial{display:inline-flex;align-items:center;justify-content:center;flex:none;width:42px;height:42px;border-radius:50%;background:#e4edf5;color:#254c6d;border:1px solid #cbdce9;font-weight:700;font-size:17px}
+.person-heading h2{margin:12px 0 5px}
+.focus-meta{font-size:11px;color:#71869b;margin-top:8px}
+.focus-empty{display:flex;align-items:center;gap:13px;padding:24px;color:#70859a;font:italic 17px 'Playfair Display',serif}
+.focus-empty-icon{display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:50%;background:#edf3f8;color:#5b7f9f;font:normal 22px 'DM Sans',sans-serif}
+.viewer.focus-enter{animation:focus-appear .22s ease-out}
+@keyframes focus-appear{from{opacity:.35;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+@media(prefers-reduced-motion:reduce){.viewer.focus-enter{animation:none}}
+@media(max-width:700px){.viewer .focus-topic{padding:14px 15px}.person-initial{width:35px;height:35px;font-size:14px}}
