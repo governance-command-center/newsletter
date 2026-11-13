@@ -82,7 +82,16 @@ function switchPerson(n){if(editing&&dirty&&!confirm('Discard unsaved changes?')
 $('editBtn').onclick=()=>{if(editing&&dirty&&!confirm('Discard unsaved changes?'))return;editing=!editing;dirty=false;show()};
 $('editable').addEventListener('input',()=>{dirty=true;$('saveStatus').textContent='Unsaved changes'});
 $('toolbar').addEventListener('mousedown',e=>{if(e.target.closest('button'))e.preventDefault()});
-$('toolbar').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;$('editable').focus();if(b.dataset.cmd==='addEntry'){document.execCommand('insertHTML',false,'<hr><p><br></p>')}else if(b.dataset.cmd==='removeFormat'){document.execCommand('removeFormat',false,null)}else if(b.dataset.cmd==='hiliteColor'){document.execCommand('hiliteColor',false,b.dataset.value||'#fff0aa')}else if(b.dataset.cmd==='insertUnorderedList'||b.dataset.cmd==='insertOrderedList'){
+$('toolbar').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;$('editable').focus();if(b.dataset.cmd==='addEntry'){
+ const editor=$('editable');
+ // Always append at the document root; inserting at the caret nests HRs in lists.
+ const hr=document.createElement('hr');
+ const p=document.createElement('p');p.appendChild(document.createElement('br'));
+ editor.appendChild(hr);editor.appendChild(p);
+ const range=document.createRange();range.selectNodeContents(p);range.collapse(true);
+ const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);
+ p.scrollIntoView({block:'nearest'});
+}else if(b.dataset.cmd==='removeFormat'){document.execCommand('removeFormat',false,null)}else if(b.dataset.cmd==='hiliteColor'){document.execCommand('hiliteColor',false,b.dataset.value||'#fff0aa')}else if(b.dataset.cmd==='insertUnorderedList'||b.dataset.cmd==='insertOrderedList'){
 const sel=window.getSelection(),range=sel&&sel.rangeCount?sel.getRangeAt(0):null;
 const lines=sel?sel.toString().split(/\r?\n/).map(x=>x.trim()).filter(Boolean):[];
 if(range&&!range.collapsed&&lines.length>1){
