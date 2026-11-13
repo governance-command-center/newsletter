@@ -37,8 +37,8 @@ function presentationHtml(html){
  if(!n)return root.innerHTML;
  // Render legacy typed asterisks as bullets without rewriting the saved content.
  result.querySelectorAll('p,div').forEach(el=>{
-  if(el.children.length||!/^\\s*\\*\\s*\\S/.test(el.textContent))return;
-  el.textContent=el.textContent.replace(/^\\s*\\*\\s*/,'');
+  if(el.children.length||!/^\s*\*\s*\S/.test(el.textContent))return;
+  el.textContent=el.textContent.replace(/^\s*\*\s*/,'');
   el.classList.add('focus-legacy-bullet');
  });
  return result.innerHTML;
