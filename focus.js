@@ -17,15 +17,45 @@ function getRow(){return rows.find(r=>r.user_id===selected)}
 function canEdit(){return selected===me||role==='admin'}
 function safe(html){const t=document.createElement('template');t.innerHTML=html;const allowed=new Set(['B','STRONG','I','EM','U','MARK','UL','OL','LI','P','DIV','BR','SPAN','FONT','H2','H3']);function clean(root){[...root.children].forEach(el=>{if(!allowed.has(el.tagName)){const frag=document.createDocumentFragment();while(el.firstChild)frag.appendChild(el.firstChild);el.replaceWith(frag);clean(root);return}for(const a of [...el.attributes]){if(a.name==='style'){const v=a.value;el.removeAttribute('style');const color=v.match(/background-color:\s*(#[0-9a-f]{3,6}|rgb\([0-9, ]+\))/i);if(color)el.style.backgroundColor=color[1]}else if(!(el.tagName==='FONT'&&a.name==='size'))el.removeAttribute(a.name)}clean(el)})}clean(t.content);return t.innerHTML}
 function content(){const row=getRow();return (row?.content||[]).join('')}
+function topicCount(html){const t=document.createElement('div');t.innerHTML=html;return t.querySelectorAll('h2,h3').length}
+function presentationHtml(html){
+ const root=document.createElement('div');root.innerHTML=html;
+ const headings=[...root.children].filter(e=>e.matches('h2,h3'));
+ if(!headings.length)return root.innerHTML;
+ const result=document.createElement('div');let section=null,n=0;
+ [...root.childNodes].forEach(node=>{
+  if(node.nodeType===1&&node.matches('h2,h3')){
+   section=document.createElement('section');section.className='focus-topic';
+   const tag=document.createElement('span');tag.className='focus-topic-label';
+   tag.textContent=String(++n).padStart(2,'0')+' / DISCUSSION TOPIC';
+   section.appendChild(tag);result.appendChild(section);
+  }
+  (section||result).appendChild(node);
+ });
+ return result.innerHTML;
+}
+function presentMeta(html){
+ const t=document.createElement('div');t.innerHTML=html;
+ const items=t.querySelectorAll('li').length;
+ const topics=topicCount(html);
+ return (topics?topics+' topic'+(topics===1?'':'s')+' · ':'')+(items?items+' discussion point'+(items===1?'':'s'):'Discussion notes');
+}
 function show(){const m=members.find(x=>x.id===selected);if(!m)return;
 $('people').innerHTML='';members.forEach(x=>{const b=document.createElement('button');b.textContent=label(x);b.className=(x.id===selected?'active ':'')+(rows.some(r=>r.user_id===x.id&&r.content?.some(Boolean))?'has':'');b.onclick=()=>{if(editing&&dirty&&!confirm('Discard unsaved changes?'))return;editing=false;dirty=false;selected=x.id;show()};$('people').appendChild(b)});
 $('pageNo').textContent=String(members.findIndex(x=>x.id===selected)+1).padStart(2,'0');
-$('personName').textContent=label(m);$('personSub').textContent=selected===me?'Your discussion page':'Member discussion page';
+$('personName').textContent=label(m);
+const heading=$('personName');const parent=heading.parentElement;
+let wrap=parent.querySelector('.person-heading');
+if(!wrap){wrap=document.createElement('div');wrap.className='person-heading';parent.insertBefore(wrap,heading);const avatar=document.createElement('span');avatar.className='person-initial';avatar.setAttribute('aria-hidden','true');wrap.appendChild(avatar);wrap.appendChild(heading)}
+wrap.querySelector('.person-initial').textContent=label(m).trim().charAt(0).toUpperCase();
+$('personSub').textContent=selected===me?'Your discussion page':'Member discussion page';
+let meta=parent.querySelector('.focus-meta');if(!meta){meta=document.createElement('div');meta.className='focus-meta';$('personSub').after(meta)}
+meta.textContent=presentMeta(safe(content()));
 $('counter').textContent=(members.findIndex(x=>x.id===selected)+1)+' / '+members.length;
 $('previous').disabled=members[0].id===selected;$('next').disabled=members[members.length-1].id===selected;
 $('editBtn').hidden=!canEdit()||document.body.classList.contains('presentation');$('editBtn').textContent=editing?'Cancel editing':selected===me?'Edit my topics':'Admin override · Edit';
 $('viewer').hidden=editing;$('editor').hidden=!editing;
-if(!editing){const h=safe(content());$('viewer').innerHTML=h||'<div class="empty">No topics submitted yet.</div>'}
+if(!editing){const h=safe(content());$('viewer').innerHTML=h?presentationHtml(h):'<div class="focus-empty"><span class="focus-empty-icon" aria-hidden="true">✎</span><span>No topics yet. Add yours before the meeting.</span></div>';$('viewer').classList.remove('focus-enter');void $('viewer').offsetWidth;$('viewer').classList.add('focus-enter')}
 else {$('editable').innerHTML=safe(content());$('saveBtn').disabled=false}
 }
 async function load(){if(editing&&dirty&&!confirm('Discard unsaved changes?'))return;editing=false;dirty=false;$('weekLabel').textContent=nice(week)+' – '+nice(new Date(date(week).getTime()+6*86400000).toISOString().slice(0,10));$('saveStatus').textContent='Loading…';try{const data=await api({operation:'read',week});members=data.members.sort(sorted);rows=data.rows;me=data.me;role=data.role;if(!members.some(m=>m.id===selected))selected=members.find(m=>m.id===me)?.id||members[0]?.id||'';$('summary').textContent=members.length+' presenters · '+rows.filter(r=>r.content?.some(Boolean)).length+' with topics';$('saveStatus').textContent='Shared workspace';show()}catch(e){$('saveStatus').textContent=e.message;alertMsg(e.message)}}
