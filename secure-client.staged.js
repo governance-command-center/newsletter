@@ -153,6 +153,9 @@
       setRole: async function (username, role) {
         return action("set_role", { username: username, role: role }, await token());
       },
+      setFocusPresenter: async function (username, enabled) {
+        return action("set_focus_presenter", { username: username, enabled: enabled }, await token());
+      },
       resetPassword: async function (username, temporaryPassword) {
         return action("reset_password", { username: username,
           temporary_password: temporaryPassword }, await token());
