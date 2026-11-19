@@ -6163,7 +6163,7 @@ function renderSecureMembersPane(wrap){
     return client.listUsers().then(function(result){
       var list=wrap.querySelector('#secureMemberList');if(!list)return;
       var users=Array.isArray(result.users)?result.users:[];
-      list.innerHTML=users.length?'<table class="data-table" style="width:100%"><thead><tr><th>Username</th><th>Role</th><th>Password</th><th>Action</th></tr></thead><tbody>'
+      list.innerHTML=users.length?'<table class="data-table" style="width:100%"><thead><tr><th>Username</th><th>Role</th><th>Password</th><th>Weekly Focus presenter</th><th>Action</th></tr></thead><tbody>'
         +users.map(function(u){
           return '<tr><td>'+esc(u.username)+'</td><td>'+esc(u.role)+'</td><td>'+(u.must_change_password?'Change required':'Set')+'</td>'
             +'<td><input type="checkbox" aria-label="Show '+esc(u.username)+' in Weekly Focus" data-focus-user="'+esc(u.username)+'" '+(u.focus_presenter!==false?'checked':'')+'></td>'
