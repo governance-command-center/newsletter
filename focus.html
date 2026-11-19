@@ -4,8 +4,8 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="focus.css?v=6-editorial-refine"></head>
 <body><header class="top"><a class="back" href="./">← &nbsp; MERCHANDISING HUB</a><span class="topbrand">WEEKLY FOCUS <span class="dot">◆</span></span><button id="present" class="primary">Present ↗</button></header>
-<main class="layout"><div class="eyebrow">THE ROUNDTABLE / WEEKLY DISCUSSION</div><div class="headline"><div><h1>Weekly Focus<span class="period">.</span></h1><p>One shared conversation. A dedicated page for every voice.</p></div><div class="weekbox"><button id="prevWeek" aria-label="Previous week">‹</button><div><small>MEETING WEEK</small><strong id="weekLabel"></strong></div><button id="nextWeek" aria-label="Next week">›</button></div></div>
-<div style="margin:8px 0 14px"><label for="historyWeeks" style="font-size:12px;color:#52647a;margin-right:8px">SAVED WEEKLY FOCUS HISTORY</label><select id="historyWeeks" style="padding:8px;border:1px solid #d6dfe8;border-radius:7px;background:white;max-width:100%"><option value="">Loading saved weeks…</option></select></div><div class="summary"><span id="summary">Loading members…</span><span id="saveStatus">Checking session…</span></div>
+<main class="layout"><div class="eyebrow">THE ROUNDTABLE / WEEKLY DISCUSSION</div><div class="headline"><div><h1>Weekly Focus<span class="period">.</span></h1><p>One shared conversation. A dedicated page for every voice.</p></div><div class="weekbox"><button id="prevWeek" aria-label="Previous week">‹</button><div style="text-align:center"><small>MEETING WEEK</small><strong id="weekLabel"></strong><select id="historyWeeks" aria-label="Jump to saved meeting week" style="display:block;width:100%;max-width:170px;margin:5px auto 0;padding:3px 5px;font-size:10px;border:1px solid #d6dfe8;border-radius:5px;background:white;color:#203653"><option value="">Saved weeks…</option></select></div><button id="nextWeek" aria-label="Next week">›</button></div></div>
+<div class="summary"><span id="summary">Loading members…</span><span id="saveStatus">Checking session…</span></div>
 <section class="people" id="people"></section>
 <section class="paper"><div class="paperhead"><div><div class="eyebrow">DISCUSSION NOTES / <span id="pageNo">01</span></div><h2 id="personName">—</h2><div id="personSub" class="sub"></div></div><button id="editBtn" class="outline" hidden>Edit my topics</button></div>
 <div id="viewer" class="viewer"></div>
@@ -13,4 +13,4 @@
 <div class="paperfoot"><button id="previous" class="outline">← Previous</button><span id="counter"></span><button id="next" class="outline">Next →</button></div></section>
 <p class="footnote">Each week begins with a blank page. Previous weeks remain available through the week selector.</p></main>
 <div id="toast" role="status" aria-live="polite"></div>
-<script src="focus.js?v=20261119-history"></script></body></html>
+<script src="focus.js?v=20261119-unified-week"></script></body></html>
