@@ -6166,8 +6166,22 @@ function renderSecureMembersPane(wrap){
       list.innerHTML=users.length?'<table class="data-table" style="width:100%"><thead><tr><th>Username</th><th>Role</th><th>Password</th><th>Action</th></tr></thead><tbody>'
         +users.map(function(u){
           return '<tr><td>'+esc(u.username)+'</td><td>'+esc(u.role)+'</td><td>'+(u.must_change_password?'Change required':'Set')+'</td>'
+            +'<td><input type="checkbox" aria-label="Show '+esc(u.username)+' in Weekly Focus" data-focus-user="'+esc(u.username)+'" '+(u.focus_presenter!==false?'checked':'')+'></td>'
             +'<td>'+(u.username===sessionPilotUsername?'Current account':'<button type="button" class="btn btn--sm" data-role-user="'+esc(u.username)+'" data-role-next="'+(u.role==='admin'?'member':'admin')+'">Make '+(u.role==='admin'?'member':'admin')+'</button>')+'</td></tr>';
         }).join('')+'</tbody></table>':'No accounts found.';
+      list.querySelectorAll('[data-focus-user]').forEach(function(toggle){
+        toggle.onchange=function(){
+          var username=this.getAttribute('data-focus-user'),enabled=this.checked;
+          this.disabled=true;
+          client.setFocusPresenter(username,enabled).then(function(){
+            msg.textContent=username+(enabled?' added to':' removed from')+' Weekly Focus presenters.';
+            return loadMembers();
+          }).catch(function(e){
+            msg.textContent=e.message||'Could not update presenter.';
+            toggle.checked=!enabled;toggle.disabled=false;
+          });
+        };
+      });
       list.querySelectorAll('[data-role-user]').forEach(function(button){
         button.onclick=function(){
           var username=this.getAttribute('data-role-user'),role=this.getAttribute('data-role-next');
