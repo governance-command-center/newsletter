@@ -76,6 +76,18 @@ if(!editing){const h=safe(content());$('viewer').innerHTML=h?presentationHtml(h)
 else {$('editable').innerHTML=safe(content());$('saveBtn').disabled=false}
 }
 async function load(){if(editing&&dirty&&!confirm('Discard unsaved changes?'))return;editing=false;dirty=false;$('weekLabel').textContent=nice(week)+' – '+nice(new Date(date(week).getTime()+6*86400000).toISOString().slice(0,10));$('saveStatus').textContent='Loading…';try{const data=await api({operation:'read',week});members=data.members.sort(sorted);rows=data.rows;me=data.me;role=data.role;if(!members.some(m=>m.id===selected))selected=members.find(m=>m.id===me)?.id||members[0]?.id||'';$('summary').textContent=members.length+' presenters · '+rows.filter(r=>r.content?.some(Boolean)).length+' with topics';$('saveStatus').textContent='Shared workspace';show()}catch(e){$('saveStatus').textContent=e.message;alertMsg(e.message)}}
+// Historical week picker: show only weeks with saved discussion content.
+async function loadFocusHistory(){
+  const picker=$('historyWeeks');if(!picker)return;
+  const today=weekOf(new Date());
+  const candidates=Array.from({length:16},(_,i)=>{const d=date(today);d.setUTCDate(d.getUTCDate()-7*i);return d.toISOString().slice(0,10)});
+  const results=await Promise.allSettled(candidates.map(w=>api({operation:'read',week:w})));
+  const populated=candidates.filter((w,i)=>results[i].status==='fulfilled'&&
+    (results[i].value.rows||[]).some(r=>r.content?.some(Boolean)));
+  picker.innerHTML='<option value="">Browse saved weeks…</option>'+populated.map(w=>'<option value="'+w+'">'+nice(w)+' – '+nice(new Date(date(w).getTime()+6*86400000).toISOString().slice(0,10))+'</option>').join('');
+  picker.value=populated.includes(week)?week:'';
+}
+$('historyWeeks')?.addEventListener('change',e=>{if(e.target.value){week=e.target.value;load()}});
 $('prevWeek').onclick=()=>moveWeek(-1);$('nextWeek').onclick=()=>moveWeek(1);
 $('previous').onclick=()=>switchPerson(-1);$('next').onclick=()=>switchPerson(1);
 function switchPerson(n){if(editing&&dirty&&!confirm('Discard unsaved changes?'))return;editing=false;dirty=false;const i=members.findIndex(m=>m.id===selected)+n;if(members[i]){selected=members[i].id;show()}}
@@ -104,5 +116,5 @@ $('saveBtn').onclick=async()=>{if(busy)return;busy=true;$('saveBtn').disabled=tr
 $('present').onclick=()=>{if(editing&&dirty&&!confirm('Discard unsaved changes?'))return;editing=false;dirty=false;document.body.classList.toggle('presentation');$('present').textContent=document.body.classList.contains('presentation')?'Exit presentation':'Present ↗';show()};
 document.addEventListener('keydown',e=>{if(document.body.classList.contains('presentation')&&e.key==='Escape'){$('present').click()}else if(document.body.classList.contains('presentation')&&e.key==='ArrowRight')switchPerson(1);else if(document.body.classList.contains('presentation')&&e.key==='ArrowLeft')switchPerson(-1)});
 window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue=''}});
-load();
+load();loadFocusHistory().catch(e=>console.warn('History picker unavailable',e));
 })();
