@@ -3782,16 +3782,14 @@ function renderWorkspace(){
 // A fresh draft for the Add form, pre-seeded with one empty text block so the
 // editor is visible immediately.
 
-/* Wednesday–Monday reporting cycle; the period records when the team obtained updates. */
+/* Monday–Friday reporting cycle; the period records when the team obtained updates. */
 function coverageIso(d){return d.toISOString().slice(0,10);}
 function coverageDate(s){var d=new Date(s+'T12:00:00Z');return isNaN(d.getTime())?null:d;}
 function coverageRangeForDay(iso){
   var day=coverageDate(iso);if(!day)return null;
-  var dow=day.getUTCDay(),daysSinceWed=(dow+4)%7;
-  // On Tuesday the preceding Wednesday–Monday batch remains current.
-  if(dow===2)daysSinceWed=6;
-  var start=new Date(day);start.setUTCDate(day.getUTCDate()-daysSinceWed);
-  var end=new Date(start);end.setUTCDate(start.getUTCDate()+5);
+  var daysSinceMonday=(day.getUTCDay()+6)%7;
+  var start=new Date(day);start.setUTCDate(day.getUTCDate()-daysSinceMonday);
+  var end=new Date(start);end.setUTCDate(start.getUTCDate()+4);
   return {start:coverageIso(start),end:coverageIso(end)};
 }
 function coverageLabel(start,end){return fmtDate(start)+' – '+fmtDate(end);}
@@ -4227,12 +4225,12 @@ function renderAddPane(wrap){
 
         + '<div class="formfield formfield--wide"><label>Title <span class="addphase__required">*</span></label><input type="text" id="fTitle" value="'+esc(d.title)+'" placeholder="Headline for this update"><small class="addphase__error" data-error-for="fTitle"></small></div>'
       + '</div>'
-      + '<div class="addphase__section"><h3>2. Coverage &amp; official sources</h3><p>Coverage is based on when the team obtained updates (Wednesday–Monday), not the marketplace publish date.</p></div>'
+      + '<div class="addphase__section"><h3>2. Coverage &amp; official sources</h3><p>Coverage uses the Monday–Friday week when the team obtained the updates.</p></div>'
       + '<div class="formgrid">'
         + '<div class="formfield formfield--wide"><label>Coverage period *</label><select id="fCoverage">'+(function(){
             var options=coverageOptions(d),selected=d.coverage_start&&d.coverage_end?d.coverage_start+'|'+d.coverage_end:'';
             return options.map(function(o){return '<option value="'+esc(o.key)+'"'+(selected===o.key?' selected':'')+'>'+esc(o.label)+'</option>';}).join('')+'<option value="custom"'+(!selected?' selected':'')+'>Custom date range</option>';
-          })()+'</select><span class="formfield__hint">Wednesday–Monday: dates when the team obtained these updates. Choose an earlier batch for late encoding.</span><small class="addphase__error" data-error-for="fCoverage"></small></div>'
+          })()+'</select><span class="formfield__hint">Defaults to the current Monday–Friday week. Choose an earlier week or a custom range if needed.</span><small class="addphase__error" data-error-for="fCoverage"></small></div>'
         + '<div class="formfield" id="fCoverageStartWrap"><label>Coverage start</label><input type="date" id="fCoverageStart" value="'+esc(d.coverage_start||'')+'"></div>'
         + '<div class="formfield" id="fCoverageEndWrap"><label>Coverage end</label><input type="date" id="fCoverageEnd" value="'+esc(d.coverage_end||'')+'"></div>'
         + regionFieldHtml(d, editing)
