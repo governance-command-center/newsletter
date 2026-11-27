@@ -3766,7 +3766,7 @@ function renderWorkspace(){
   else if (state.nav === 'export') renderExportPane(wrap);
   else if (state.nav === 'archive') renderArchivePane(wrap);
   else if (state.nav === 'email')  renderEmailPane(wrap);
-  else if (state.nav === 'editorial' && window.renderEditorialPane) window.renderEditorialPane(wrap, slides.filter(function(e){return e.status!=='archived' && e.published!==false;}), {esc:esc,regions:entryRegions,link:entryPrimaryLink,text:approvedText,period:periodCoveredLabel});
+  else if (state.nav === 'editorial' && window.renderEditorialPane) window.renderEditorialPane(wrap, slides.filter(function(e){return e.status!=='archived' && e.published!==false;}), {esc:esc,regions:entryRegions,link:entryPrimaryLink,links:entryLinks,text:approvedText,period:periodCoveredLabel});
   else if (state.nav === 'members') renderMembersPane(wrap);
 }
 
