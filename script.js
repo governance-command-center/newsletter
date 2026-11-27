@@ -5128,6 +5128,22 @@ function renderPresent(){
       + presentLinkHtml
       + '<div class="present__content">'+renderBody(s.body, false)+'</div>'
     + '</div>';
+  var imageDialog = document.getElementById('presentImageDialog');
+  var images = imageDialog ? stage.querySelectorAll('.present__content img') : [];
+  images.forEach(function(img){
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'present__image-trigger';
+    button.setAttribute('aria-label', 'Enlarge ' + (img.alt || 'slide image'));
+    img.replaceWith(button);
+    button.appendChild(img);
+    button.addEventListener('click', function(){
+      var preview = document.getElementById('presentImagePreview');
+      preview.src = img.currentSrc || img.src;
+      preview.alt = img.alt;
+      imageDialog.showModal();
+    });
+  });
   stage.scrollTop = 0;
 
   // progress dots — mark where a new date begins
@@ -5147,6 +5163,13 @@ function renderPresent(){
 }
 
 function initPresentControls(){
+  var imageDialog = document.getElementById('presentImageDialog');
+  if (imageDialog){
+    document.getElementById('presentImageClose').addEventListener('click', function(){ imageDialog.close(); });
+    imageDialog.addEventListener('close', function(){
+      if (!imageDialog.open) document.getElementById('presentImagePreview').removeAttribute('src');
+    });
+  }
   document.getElementById('presentPrev').addEventListener('click', function(){ presentGo(-1); });
   document.getElementById('presentNext').addEventListener('click', function(){ presentGo(1); });
   document.getElementById('presentClose').addEventListener('click', closePresentation);
@@ -5166,11 +5189,14 @@ function initPresentControls(){
   }
   document.addEventListener('keydown', function(e){
     var ov = document.getElementById('presentOverlay');
-    if (!ov || ov.hidden) return;
+    if (!ov || ov.hidden || (imageDialog && imageDialog.open)) return;
+    if (e.key === 'Escape'){
+      closePresentation();
+      return;
+    }
     if (e.target && /^(SELECT|INPUT|TEXTAREA|BUTTON)$/.test(e.target.tagName)) return;
     if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' '){ e.preventDefault(); presentGo(1); }
     else if (e.key === 'ArrowLeft' || e.key === 'PageUp'){ e.preventDefault(); presentGo(-1); }
-    else if (e.key === 'Escape'){ closePresentation(); }
     else if (e.key === 'Home'){ state.present.index = 0; renderPresent(); }
     else if (e.key === 'End'){ state.present.index = Math.max(0, state.present.list.length-1); renderPresent(); }
   });
