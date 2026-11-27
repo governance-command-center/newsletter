@@ -4140,6 +4140,14 @@ function entryCoverageOptionsHtml(list,selected){
     entryCoverageGroups(list).map(function(g){return '<option value="'+esc(g.key)+'"'+(selected===g.key?' selected':'')+'>'+esc(g.label)+' ('+g.count+')</option>';}).join('');
 }
 
+function compareNewestEntries(a,b){
+  function addedTime(entry){
+    var stamp = entry.createdAt || entry.created_at || entry.updatedAt || entry.updated_at;
+    return Number(stamp) || Date.parse(stamp) || 0;
+  }
+  return addedTime(b) - addedTime(a) || String(a.id).localeCompare(String(b.id));
+}
+
 function renderAddPane(wrap){
   if (!state.editDraft){state.editDraft=blankDraft();markAddSaved();}
   var d = state.editDraft;
@@ -4175,42 +4183,13 @@ function renderAddPane(wrap){
     + '</tr>';
   }
 
-  // Build grouped rows: first by coverage period (newest first), then by region
-  // (PH-MY-SG-TH-VN). An entry covering several regions appears once, filed
-  // under its first region in that order.
-  var COLSPAN = 7;
-  function primaryRegionForGroup(s){
-    var regs = entryRegions(s);
-    if (!regs.length) return '';
-    return regs.slice().sort(function(a,b){ return regionGroupRank(a) - regionGroupRank(b); })[0];
-  }
-  var idGroups = entryCoverageGroups(visibleSlides); // newest coverage first; legacy entries remain visible
-  var listRows = idGroups.map(function(g){
+  var listRows = entryCoverageGroups(visibleSlides).map(function(g){
     var inGroup = visibleSlides.filter(function(s){
       return coverageKey(s) === g.key;
-    });
-    // partition by region order
-    var byRegion = {};
-    inGroup.forEach(function(s){
-      var pr = primaryRegionForGroup(s) || '__none__';
-      (byRegion[pr] = byRegion[pr] || []).push(s);
-    });
-    var regionKeys = Object.keys(byRegion).sort(function(a,b){
-      var ra = a==='__none__' ? 999 : regionGroupRank(a);
-      var rb = b==='__none__' ? 999 : regionGroupRank(b);
-      return ra - rb || a.localeCompare(b);
-    });
-    var dateHeader = '<tr class="entrytable__grouphead entrytable__grouphead--date">'
-      + '<td colspan="'+COLSPAN+'">'+esc(g.label)+' &middot; '+inGroup.length+' entr'+(inGroup.length===1?'y':'ies')+'</td></tr>';
-    var body = regionKeys.map(function(rk){
-      var label = rk==='__none__' ? 'No region' : rk;
-      var rows = byRegion[rk].slice().sort(function(a,b){
-        return (a.platform||'').localeCompare(b.platform||'') || (a.title||'').localeCompare(b.title||'');
-      }).map(entryRowHtml).join('');
-      return '<tr class="entrytable__grouphead entrytable__grouphead--region">'
-        + '<td colspan="'+COLSPAN+'">'+esc(label)+'</td></tr>' + rows;
-    }).join('');
-    return dateHeader + body;
+    }).sort(compareNewestEntries);
+    return '<tr class="entrytable__grouphead entrytable__grouphead--date">'
+      + '<td colspan="7">'+esc(g.label)+' &middot; '+inGroup.length+' entr'+(inGroup.length===1?'y':'ies')+'</td></tr>'
+      + inGroup.map(entryRowHtml).join('');
   }).join('');
 
   wrap.innerHTML =
@@ -4985,11 +4964,9 @@ function saveEntry(wrap){
 
 /* ============================================================
    PRESENTATION MODE
-   A full-screen walkthrough. Slides are ordered by date (newest first),
-   then region, then platform — matching how the newsletter reads — and
-   flattened into a linear sequence you step through with the arrow keys
-   or on-screen controls. The breadcrumb shows where you are in the
-   date → region → platform hierarchy.
+   A full-screen walkthrough ordered by coverage period, then by when
+   each update was added, newest first. The breadcrumb shows the current
+   slide's coverage, regions and platform.
    ============================================================ */
 
 // Every slide needs to land in *some* publish-date group, even if it was
@@ -5009,22 +4986,12 @@ function buildPresentOrder(){
   if (df && df !== '__all__'){
     list = list.filter(function(s){ return presentDateKey(s) === df; });
   }
-  var regionRank = function(r){ var i = ALLOWED_REGIONS.indexOf(r); return i === -1 ? 999 : i; };
-  var platRank = function(p){ var i = ALLOWED_PLATFORMS.indexOf(p); return i === -1 ? 999 : i; };
   list.sort(function(a,b){
-    // Coverage: newest first; legacy entries use their recorded input dates,
-    // grouped by their date_range (or "Undated") instead of scattering.
     var ka = presentDateKey(a), kb = presentDateKey(b);
-    if (ka !== kb){
-      var da = (entryCoverage(a)||{}).start||a.input_date||'', db = (entryCoverage(b)||{}).start||b.input_date||'';
-      if (!da && !db) return presentDateLabel(a).localeCompare(presentDateLabel(b));
-      if (!da) return 1;
-      if (!db) return -1;
-      return db.localeCompare(da);
-    }
-    var rr = regionRank(a.region) - regionRank(b.region);
-    if (rr !== 0) return rr;
-    return platRank(a.platform) - platRank(b.platform);
+    if (ka === kb) return compareNewestEntries(a,b);
+    var da = (entryCoverage(a)||{}).start||a.input_date||'';
+    var db = (entryCoverage(b)||{}).start||b.input_date||'';
+    return db.localeCompare(da) || ka.localeCompare(kb);
   });
   return list;
 }
