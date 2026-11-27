@@ -4965,7 +4965,7 @@ function saveEntry(wrap){
 /* ============================================================
    PRESENTATION MODE
    A full-screen walkthrough ordered by coverage period, then by when
-   each update was added, newest first. The breadcrumb shows the current
+   each update was added, oldest first. The breadcrumb shows the current
    slide's coverage, regions and platform.
    ============================================================ */
 
@@ -4988,7 +4988,7 @@ function buildPresentOrder(){
   }
   list.sort(function(a,b){
     var ka = presentDateKey(a), kb = presentDateKey(b);
-    if (ka === kb) return compareNewestEntries(a,b);
+    if (ka === kb) return compareNewestEntries(b,a);
     var da = (entryCoverage(a)||{}).start||a.input_date||'';
     var db = (entryCoverage(b)||{}).start||b.input_date||'';
     return db.localeCompare(da) || ka.localeCompare(kb);
